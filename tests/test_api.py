@@ -375,3 +375,21 @@ def test_product_gst_filter_and_pagination(client):
     page = client.get("/api/products", params={"gst_rate": "28", "limit": 1}).json()
     assert all(Decimal(p["gst_rate"]) == 28 for p in page["items"])
     assert client.get("/api/products", params={"limit": 1, "offset": 1}).status_code == 200
+
+
+def test_export_all_data_as_xlsx(client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    r = client.get("/api/export/xlsx")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml")
+    assert "OHM-Powerin-data-" in r.headers["content-disposition"] and ".xlsx" in r.headers["content-disposition"]
+    wb = load_workbook(BytesIO(r.content))
+    assert wb.sheetnames == ["Business", "Customers", "Products", "Invoices", "Invoice Items"]
+    assert wb["Invoices"].max_row - 1 == client.get("/api/invoices", params={"limit": 1}).json()["total"]
+    assert wb["Products"].max_row - 1 == client.get("/api/products", params={"limit": 1}).json()["total"]
+    assert wb["Customers"].max_row - 1 == client.get("/api/customers", params={"limit": 1}).json()["total"]
+    # totals are real numbers, not text
+    headers = [c.value for c in wb["Invoices"][1]]
+    grand = headers.index("Grand total") + 1
+    assert all(isinstance(wb["Invoices"].cell(row=r_, column=grand).value, (int, float)) for r_ in range(2, wb["Invoices"].max_row + 1))

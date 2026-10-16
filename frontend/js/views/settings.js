@@ -23,6 +23,7 @@ export async function render({ el, setTitle, isCurrent }) {
         <a href="#/settings" data-jump="tax">Tax &amp; address</a>
         <a href="#/settings" data-jump="bank">Bank &amp; UPI</a>
         <a href="#/settings" data-jump="invoice">Invoice preferences</a>
+        <a href="#/settings" data-jump="export">Export data</a>
       </nav>
       <div>
         <div class="card" id="sec-biz">
@@ -93,6 +94,14 @@ export async function render({ el, setTitle, isCurrent }) {
             <div class="field"><label for="s-fwa">WhatsApp number</label><input id="s-fwa" name="footer_whatsapp" maxlength="100"><label class="check" style="display:flex;gap:6px;align-items:center;margin-top:6px;font-weight:400"><input type="checkbox" data-wa-same> Same as call number</label></div>
             <div class="field"><label for="s-femail">Email</label><input id="s-femail" name="footer_email" maxlength="200"></div>
             <div class="field span-2"><label for="s-faddr">Address line</label><input id="s-faddr" name="footer_address" maxlength="500"></div>
+          </div>
+        </div>
+
+        <div class="card" id="sec-export">
+          <div class="card-header"><div><h2>Export data</h2><p>Download everything as one Excel workbook for backup or accounting.</p></div></div>
+          <div class="card-body">
+            <p class="modal-text">The file has five sheets: <b>Business</b> details, <b>Customers</b>, <b>Products</b> (the full catalogue), <b>Invoices</b> and <b>Invoice Items</b>. It includes your bank details, so keep the file private.</p>
+            <a class="btn btn-primary" href="/api/export/xlsx" download data-export>${icons.download}Download all data (.xlsx)</a>
           </div>
         </div>
 
