@@ -143,7 +143,8 @@ answers the app's `api/*` requests through a service worker. The database is SQL
 
 * Turn it on once: repository **Settings → Pages → Build and deployment → Deploy from a branch → `main` / `(root)`**.
   The site is then at `https://<user>.github.io/<repo>/` (the root page forwards to `frontend/`).
-* The first start downloads about 30 MB and takes roughly 30–60 seconds; the page shows its progress.
+* The first start downloads about 26 MB and takes roughly 30–60 seconds; the page shows its progress and a clear message if it stalls.
+  Everything (Python runtime, libraries, wheels) is served from the site itself under `frontend/engine/`; no CDN or PyPI is contacted.
 * When the page is served by a real backend (`uvicorn`) none of this is used.
 * After changing anything under `backend/` run `python tools/build_static.py` and commit `frontend/engine/app.zip`
   (a test fails if the bundle is out of date).

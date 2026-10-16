@@ -4,7 +4,13 @@ const splash = document.getElementById("engine-splash");
 const statusEl = document.getElementById("engine-status");
 const errorEl = document.getElementById("engine-error");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const setStatus = (text) => { if (statusEl) statusEl.textContent = text; };
+let stepText = "Starting…";
+let stepSince = Date.now();
+const startedAt = Date.now();
+const setStatus = (text) => { stepText = text; stepSince = Date.now(); render(); };
+const render = () => { if (statusEl) statusEl.textContent = `${stepText}  (${Math.round((Date.now() - startedAt) / 1000)}s)`; };
+setInterval(render, 1000);
+const STALL_MS = 150000;  // no progress for this long: show a clear error instead of loading forever
 
 let worker = null;
 let engineReady = false;
@@ -15,7 +21,9 @@ const pending = new Map();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     const message = event.data;
-    if (!message || message.type !== "engine-request") return;
+    if (!message) return;
+    if (message.type === "engine-ping") { event.ports[0].postMessage(engineReady); return; }
+    if (message.type !== "engine-request") return;
     const port = event.ports[0];
     if (!engineReady) { port.postMessage(null); return; }
     const id = nextId++;
@@ -40,8 +48,11 @@ async function startEngine() {
   }
   splash.hidden = false;
   setStatus("Preparing…");
-  await navigator.serviceWorker.register("sw.js");
-  await navigator.serviceWorker.ready;
+  const registration = await navigator.serviceWorker.register("sw.js");
+  await Promise.race([navigator.serviceWorker.ready, sleep(20000)]);
+  if (!registration.active) {
+    throw new Error("The browser did not start the background worker this app needs. Private/incognito windows in some browsers block it: open the site in a normal window.");
+  }
   if (!navigator.serviceWorker.controller) {
     await Promise.race([new Promise((resolve) => navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true })), sleep(4000)]);
   }
@@ -57,6 +68,14 @@ async function startEngine() {
 
   worker = new Worker(new URL("worker.js", import.meta.url));
   await new Promise((resolve, reject) => {
+    const watchdog = setInterval(() => {
+      if (Date.now() - stepSince > STALL_MS) {
+        clearInterval(watchdog);
+        reject(new Error(`Start-up stalled at "${stepText}". Check your internet connection, disable content blockers for this site, and try again.`));
+      }
+    }, 5000);
+    const done = (fn) => (value) => { clearInterval(watchdog); fn(value); };
+    resolve = done(resolve); reject = done(reject);
     worker.onmessage = (event) => {
       const message = event.data;
       if (message.type === "progress") setStatus(message.text);

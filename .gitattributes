@@ -1,0 +1,5 @@
+frontend/engine/pyodide/** -text
+frontend/engine/wheels/** -text
+*.zip binary
+*.ttf binary
+*.png binary

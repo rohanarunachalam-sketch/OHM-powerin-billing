@@ -12,10 +12,10 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
-function ask(client, message) {
+function ask(client, message, timeout = 180000) {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
-    const timer = setTimeout(() => resolve(null), 180000);
+    const timer = setTimeout(() => resolve(null), timeout);
     channel.port1.onmessage = (event) => { clearTimeout(timer); resolve(event.data); };
     client.postMessage(message, [channel.port2]);
   });
@@ -35,6 +35,8 @@ async function forward(request, url) {
   };
   const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   for (const client of clients) {
+    // Quick check first: tabs that are not running the engine (old tabs, still starting) must never block a request.
+    if (!(await ask(client, { type: "engine-ping" }, 1500))) continue;
     const reply = await ask(client, message);
     if (reply) {
       const empty = [204, 205, 304].includes(reply.status);

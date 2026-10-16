@@ -1,6 +1,15 @@
 // Web worker that hosts the Python backend (Pyodide). It never touches the page; it only answers requests.
-const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/";
+// Everything (Python runtime, libraries, wheels) is served from this site: no third-party CDN or PyPI needed.
+const HERE = new URL("./", self.location.href).href;
+const PYODIDE = HERE + "pyodide/";
 importScripts(PYODIDE + "pyodide.js");
+
+// Pinned releases that work with the libraries bundled in Pyodide (pydantic 2.10, SQLAlchemy 2.0).
+const WHEELS = [
+  "chardet-5.2.0-py3-none-any.whl", "et_xmlfile-2.0.0-py3-none-any.whl", "openpyxl-3.1.5-py2.py3-none-any.whl",
+  "python_multipart-0.0.20-py3-none-any.whl", "reportlab-4.2.5-py3-none-any.whl", "starlette-0.41.3-py3-none-any.whl",
+  "fastapi-0.115.6-py3-none-any.whl",
+].map((name) => HERE + "wheels/" + name);
 
 let handle = null;
 let py = null;
@@ -22,8 +31,7 @@ async function init() {
   await py.loadPackage(["micropip", "sqlalchemy", "pydantic", "pillow", "sqlite3", "anyio"]);
   progress("Installing FastAPI, ReportLab and Excel support…");
   const micropip = py.pyimport("micropip");
-  // Pinned to releases that work with the Python libraries bundled in Pyodide (pydantic 2.10, SQLAlchemy 2.0).
-  await micropip.install(["fastapi==0.115.6", "starlette==0.41.3", "reportlab==4.2.5", "openpyxl==3.1.5", "python-multipart==0.0.20"]);
+  await micropip.install(WHEELS, { deps: false });
 
   progress("Opening your saved data…");
   py.FS.mkdir("/data");
@@ -31,7 +39,7 @@ async function init() {
   await new Promise((resolve, reject) => py.FS.syncfs(true, (error) => (error ? reject(error) : resolve())));
 
   progress("Loading the billing application…");
-  const archive = await (await fetch(new URL("app.zip", self.location.href))).arrayBuffer();
+  const archive = await (await fetch(HERE + "app.zip")).arrayBuffer();
   py.unpackArchive(archive, "zip", { extractDir: "/app" });
   await py.runPythonAsync("import sys\nif '/app' not in sys.path: sys.path.insert(0, '/app')\nimport shim");
   handle = py.pyimport("shim").handle;
