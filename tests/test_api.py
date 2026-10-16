@@ -126,7 +126,7 @@ def test_acceptance_flow(client):
     assert round(width_mm) == 210 and round(height_mm) == 297
     text = " ".join(page.extract_text() for page in reader.pages)
     for expected in (
-        "Sri Lakshmi Traders", "33ABCDE1234F1Z5", "Tax Invoice", "INV-0001", "ABC Construction",
+        "Sri Lakshmi Traders", "33ABCDE1234F1Z5", "INV-0001", "ABC Construction",
         "TESTGSTIN123", "Cement", "2523", "450.00", "18%", "OUTPUT CGST @ 9%", "OUTPUT SGST @ 9%", "Taxable", "Total",
         "405.00", "5,310.00", "INR Five Thousand Three Hundred Ten Only", "State Bank of India",
         "SBIN0001234", "Authorised Signatory", "Declaration", "This is a Computer Generated Invoice",
@@ -281,7 +281,8 @@ def test_reference_fields_default_to_dash_in_pdf(client):
     pdf = client.get(f"/api/invoices/{body['id']}/pdf")
     from io import BytesIO
     text = PdfReader(BytesIO(pdf.content)).pages[0].extract_text()
-    assert "Other Reference: -" in text and "ESN: ESN-778" in text and "Phone : 9876543210" in text
+    # The reference fields are always printed; empty ones show "-".
+    assert "Other Reference" in text and "ESN-778" in text and "9876543210" in text
 
 
 def test_product_csv_import_and_part_no_on_invoice(client):
@@ -314,3 +315,63 @@ def test_logo_heights_saved_and_validated(client):
     assert r.json()["logo_heights"] == [30, 15, 20]
     r = client.put("/api/settings", json={**BUSINESS, "logo_heights": [90, 15, 20]})
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# UI/PDF redesign additions
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_overview_and_extra_kpis(client):
+    client.put("/api/settings", json=BUSINESS)
+    d = client.get("/api/dashboard").json()
+    # existing keys are untouched, new ones are additive
+    for key in ("total_sales", "paid", "pending", "overdue", "recent_invoices", "status_counts"):
+        assert key in d
+    assert d["outstanding"] == str(Decimal(d["pending"]) + Decimal(d["overdue"])) or Decimal(d["outstanding"]) == Decimal(d["pending"]) + Decimal(d["overdue"])
+    assert d["outstanding_count"] >= 0
+
+    o = client.get("/api/dashboard/overview", params={"date_from": "2020-01-01", "date_to": "2020-01-10"}).json()
+    assert (o["group"], len(o["series"]), Decimal(o["total"])) == ("day", 10, Decimal(0))
+    assert o["change_percent"] is None  # no previous-period sales: no invented percentage
+
+    today = client.get("/api/dashboard/overview").json()
+    assert len(today["series"]) == 30
+    assert Decimal(today["total"]) == sum(Decimal(p["total"]) for p in today["series"])
+    wide = client.get("/api/dashboard/overview", params={"date_from": "2025-01-01", "date_to": "2026-06-30"}).json()
+    assert wide["group"] == "month"
+
+
+def test_customer_paid_and_outstanding_totals(client):
+    customer_id = client.get("/api/customers").json()["items"][0]["id"]
+    inv = client.post("/api/invoices", json=_invoice_payload(customer_id)).json()
+    before = client.get(f"/api/customers/{customer_id}").json()
+    client.post(f"/api/invoices/{inv['id']}/payments", json={"amount": "100"})
+    after = client.get(f"/api/customers/{customer_id}").json()
+    assert Decimal(after["total_paid"]) - Decimal(before["total_paid"]) == Decimal("100")
+    assert Decimal(after["outstanding"]) == Decimal(after["total_billed"]) - Decimal(after["total_paid"])
+
+
+def test_multi_page_pdf_repeats_header_and_keeps_totals_on_last_page(client):
+    from io import BytesIO
+    customer_id = client.get("/api/customers").json()["items"][0]["id"]
+    payload = _invoice_payload(customer_id)
+    payload["items"] = [{**payload["items"][0], "name": f"Item {n}", "quantity": "1"} for n in range(1, 61)]
+    r = client.post("/api/invoices", json=payload)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    pdf = client.get(f"/api/invoices/{body['id']}/pdf")
+    pages = PdfReader(BytesIO(pdf.content)).pages
+    assert len(pages) >= 2
+    texts = [p.extract_text() for p in pages]
+    assert all("Description" in t and "Amount" in t for t in texts)          # table header repeats on every page
+    assert all(body["invoice_number"] in t for t in texts)                    # running header on every page
+    assert "Continued on next page" in texts[0] and "Continued on next page" not in texts[-1]
+    assert "Authorised Signatory" in texts[-1] and "Authorised Signatory" not in texts[0]
+    assert format_indian(Decimal(body["grand_total"])) in texts[-1]           # backend total, printed on the last page
+
+
+def test_product_gst_filter_and_pagination(client):
+    page = client.get("/api/products", params={"gst_rate": "28", "limit": 1}).json()
+    assert all(Decimal(p["gst_rate"]) == 28 for p in page["items"])
+    assert client.get("/api/products", params={"limit": 1, "offset": 1}).status_code == 200

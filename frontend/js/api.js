@@ -52,6 +52,7 @@ function query(params = {}) {
 export const api = {
   meta: () => request("GET", "/api/meta"),
   dashboard: () => request("GET", "/api/dashboard"),
+  dashboardOverview: (params) => request("GET", "/api/dashboard/overview" + query(params)),
 
   customers: (params) => request("GET", "/api/customers" + query(params)),
   customer: (id) => request("GET", `/api/customers/${id}`),

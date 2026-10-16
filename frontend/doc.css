@@ -1,0 +1,103 @@
+/* ==========================================================================
+   Invoice document — HTML preview of the A4 PDF (ModernTemplate in backend/pdf_generator.py).
+   Sizes are in mm/pt so the preview matches the printed page.
+   ========================================================================== */
+.doc-shell { background: #e9edf3; border-radius: var(--radius); padding: 24px; overflow: hidden; }
+.doc-holder { margin: 0 auto; }
+.doc-scale { transform-origin: top left; }
+.doc {
+  --d-navy: #1b3a6b; --d-ink: #1d2433; --d-muted: #5b6578; --d-rule: #d5dbe5; --d-panel: #f6f8fb; --d-head: #eaf0fa;
+  width: 210mm; min-height: 297mm; margin: 0 auto; padding: 11mm 12mm 36mm; background: #fff; color: var(--d-ink);
+  box-shadow: 0 8px 30px rgba(16, 24, 40, .15); position: relative;
+  font-family: "Inter", Arial, "Helvetica Neue", Helvetica, sans-serif; font-size: 8.4pt; line-height: 1.38;
+}
+.doc *, .doc *::before, .doc *::after { box-sizing: border-box; }
+.doc .r { text-align: right; }
+.doc .c { text-align: center; }
+.doc .l { text-align: left; }
+.doc .d-muted { color: var(--d-muted); }
+.doc .d-label { font-size: 6.8pt; font-weight: 700; color: var(--d-muted); letter-spacing: .02em; margin-bottom: 1.2mm; }
+
+/* Header */
+.doc .d-head { display: flex; justify-content: space-between; gap: 8mm; padding-bottom: 3.5mm; border-bottom: 1pt solid var(--d-navy); }
+.doc .d-seller { flex: 1; min-width: 0; font-size: 7.8pt; }
+.doc .d-logos { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4mm; }
+.doc .d-logo { object-fit: contain; max-width: 90mm; width: auto; }
+.doc .d-biz { font-size: 13pt; font-weight: 700; color: var(--d-navy); margin-bottom: 1mm; }
+.doc .d-title { flex: 0 0 74mm; }
+.doc .d-h1 { font-size: 20pt; font-weight: 700; color: var(--d-navy); text-align: right; line-height: 1.1; margin-bottom: 3mm; letter-spacing: -.01em; }
+.doc .d-meta-row { display: flex; justify-content: space-between; gap: 4mm; font-size: 8.4pt; margin-bottom: 1.1mm; }
+.doc .d-meta-row > span:first-child { color: var(--d-muted); font-size: 8pt; }
+
+/* Parties */
+.doc .d-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; margin: 5mm 0; }
+.doc .d-panel { background: var(--d-panel); border: .4pt solid var(--d-rule); border-radius: 1.5mm; padding: 3.4mm 3.6mm; font-size: 8pt; min-height: 22mm; }
+.doc .d-pname { font-size: 9.5pt; font-weight: 700; }
+
+/* Items */
+.doc table { border-collapse: collapse; width: 100%; }
+.doc .d-items { table-layout: fixed; }
+.doc .d-items th { background: var(--d-head); color: var(--d-navy); font-size: 7.3pt; font-weight: 700; padding: 2.1mm 2.2mm; border-top: .5pt solid var(--d-navy); border-bottom: .8pt solid var(--d-navy); }
+.doc .d-items td { padding: 2.3mm 2.2mm; vertical-align: top; border-bottom: .25pt solid var(--d-rule); overflow-wrap: anywhere; }
+.doc .d-items td.c, .doc .d-items td.r { white-space: nowrap; overflow-wrap: normal; }
+.doc .d-desc { font-size: 7pt; color: var(--d-muted); white-space: pre-line; font-weight: 400; }
+
+/* Totals */
+.doc .d-totals-row { display: flex; justify-content: space-between; gap: 8mm; margin-top: 5mm; align-items: flex-start; }
+.doc .d-words { flex: 0 0 96mm; }
+.doc .d-words-text { font-size: 9pt; font-weight: 700; margin-bottom: 3.5mm; }
+.doc .d-status { border: .8pt solid var(--d-navy); border-radius: 1.5mm; padding: 3mm 3.5mm; }
+.doc .d-st-title { font-size: 10pt; font-weight: 700; color: var(--d-navy); margin-bottom: 1.4mm; }
+.doc .d-st-row { display: flex; justify-content: space-between; font-size: 8pt; }
+.doc .d-st-row > span:first-child { color: var(--d-muted); }
+.doc .d-totals { flex: 0 0 80mm; }
+.doc .d-tr { display: flex; justify-content: space-between; padding: .9mm 3mm; font-size: 8.3pt; }
+.doc .d-tr.muted { color: var(--d-muted); }
+.doc .d-grand { display: flex; justify-content: space-between; align-items: center; margin-top: 2mm; padding: 2.4mm 3.5mm; background: var(--d-navy); color: #fff; border-radius: 1.5mm; font-weight: 700; font-size: 9.5pt; }
+.doc .d-grand span:last-child { font-size: 13pt; }
+
+/* GST summary */
+.doc .d-tax { margin-top: 6mm; table-layout: fixed; font-size: 8pt; }
+.doc .d-tax th { background: var(--d-head); color: var(--d-navy); font-size: 7.3pt; padding: 1.6mm 2.2mm; text-align: center; border-bottom: .6pt solid var(--d-navy); }
+.doc .d-tax thead tr:first-child th { border-top: .5pt solid var(--d-navy); }
+.doc .d-tax thead tr:first-child th[colspan="2"] { border-bottom: .3pt solid var(--d-rule); }
+.doc .d-tax th.l { text-align: left; padding-left: 3mm; }
+.doc .d-tax td { padding: 1.4mm 2.2mm; border-bottom: .25pt solid var(--d-rule); }
+.doc .d-tax td.blank { border-bottom-color: transparent; }
+.doc .d-tax tr.tot td { font-weight: 700; border-bottom: .8pt solid var(--d-navy); }
+.doc .d-tax th + th, .doc .d-tax td + td { border-left: .25pt solid var(--d-rule); }
+.doc .d-tax td.blank + td { border-left: .25pt solid var(--d-rule); }
+.doc .d-taxwords { font-size: 7.5pt; margin-top: 1.6mm; }
+
+/* Payment / terms */
+.doc .d-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8mm; margin-top: 5mm; }
+.doc .d-kv { display: flex; gap: 3mm; font-size: 8pt; margin-bottom: .8mm; }
+.doc .d-kv > span { flex: 0 0 24mm; color: var(--d-muted); }
+.doc .d-pre { font-size: 7.5pt; margin-bottom: 2mm; }
+
+/* Signature */
+.doc .d-sign { display: flex; justify-content: space-between; gap: 8mm; margin-top: 4mm; padding-top: 3mm; border-top: .3pt solid var(--d-rule); }
+.doc .d-decl { flex: 0 0 104mm; font-size: 7pt; }
+.doc .d-decl .d-thanks { font-size: 8.5pt; }
+.doc .d-sign-box { flex: 0 0 62mm; text-align: right; }
+.doc .d-for { font-weight: 700; color: var(--d-navy); font-size: 8.5pt; }
+.doc .d-sign-line { margin-top: 13mm; border-top: .5pt solid var(--d-ink); padding-top: 1mm; text-align: center; font-weight: 700; font-size: 8pt; }
+.doc .d-thanks { margin-top: 9mm; font-weight: 700; color: var(--d-navy); font-size: 8.5pt; }
+.doc .d-cg { text-align: center; color: var(--d-muted); font-size: 7pt; margin-top: 8mm; }
+
+/* Letterhead strip + page outline */
+.doc .d-strip { position: absolute; left: 0; right: 0; bottom: 9.5mm; text-align: center; color: #1f6fb5; font-weight: 700; }
+.doc .d-contact { font-size: 10pt; display: flex; justify-content: center; align-items: center; gap: 8mm; }
+.doc .d-ci { display: inline-flex; align-items: center; gap: 1.6mm; }
+.doc .d-ico { width: 4mm; height: 4mm; margin-right: -0.8mm; }
+.doc .d-ico + .d-ico { margin-left: 0.8mm; }
+.doc .d-ci .d-ico:last-of-type { margin-right: 0; }
+.doc .d-addr { font-size: 7.5pt; }
+.doc .d-outline { position: absolute; top: 4mm; left: 4mm; right: 4mm; bottom: 8.7mm; border: .7pt solid var(--d-rule); pointer-events: none; }
+.doc .d-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 7.2mm; background: #1f6fb5; border-top: 1.2mm solid #8cc4ee; }
+
+@media print {
+  .doc-shell { padding: 0; background: none; overflow: visible; }
+  .doc-holder, .doc-scale { width: auto !important; height: auto !important; transform: none !important; }
+  .doc { box-shadow: none; }
+}

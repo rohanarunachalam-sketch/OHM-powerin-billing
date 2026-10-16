@@ -2,7 +2,7 @@ import { icons } from "../utils.js";
 
 // Reports are planned for Phase 2; this page says so plainly rather than showing fake data.
 export async function render({ el, setTitle }) {
-  setTitle("Reports", "Money");
+  setTitle("Reports");
   el.innerHTML = `
     <div class="card placeholder-page">
       <div class="empty-icon">${icons.doc}</div>

@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { getSettings } from "../store.js";
 import { confirmDialog, openModal, setFieldError, toast, toastError, withBusy } from "../ui.js";
 import { esc, fmtDate, icons, money, paise, paiseToString, statusPill } from "../utils.js";
-import { renderInvoiceDocument } from "./invoice-doc.js";
+import { fitDocument, renderInvoiceDocument } from "./invoice-doc.js";
 
 /** Record-payment modal. Resolves with the updated invoice, or null. */
 export function openPaymentForm(invoice) {
@@ -39,7 +39,7 @@ export function openPaymentForm(invoice) {
       }
       try {
         updated = await withBusy(el.querySelector('button[type="submit"]'), () => api.recordPayment(invoice.id, paiseToString(amount)));
-        toast(`Payment of ${money(value)} recorded`);
+        toast("Payment recorded", "success", `${money(value)} received against ${invoice.invoice_number}.`);
         close();
       } catch (error) { toastError(error); }
     });
@@ -57,10 +57,10 @@ export async function render({ el, params, query, setTitle, navigate, isCurrent 
   const created = query.created === "1";
 
   el.innerHTML = `
-    ${created ? `<div class="banner banner-success">${icons.check}<div><b>Invoice ${esc(inv.invoice_number)} saved.</b> The A4 PDF has been generated and stored. Download it below.</div></div>` : ""}
+    ${created ? `<div class="banner banner-success">${icons.check}<div><b>Invoice ${esc(inv.invoice_number)} created successfully.</b> The A4 PDF has been generated and stored — download it from the panel on the right.</div></div>` : ""}
     ${inv.status === "Draft" ? `<div class="banner banner-warn">${icons.info}<div>This invoice is a <b>draft</b>. It is not counted in sales until you issue it.</div></div>` : ""}
     <div class="view-layout">
-      <div class="doc-shell">${renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) })}</div>
+      <div class="doc-shell" data-fit-doc>${renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) })}</div>
       <div class="stack">
         <div class="card side-card">
           <div class="card-header"><h2>${esc(inv.invoice_number)}</h2>${statusPill(inv.status)}</div>
@@ -73,11 +73,12 @@ export async function render({ el, params, query, setTitle, navigate, isCurrent 
         <div class="card">
           <div class="action-list">
             <a class="btn btn-primary btn-lg" href="${api.pdfUrl(id, true)}" download data-download>${icons.download}Download PDF</a>
-            <a class="btn" href="${api.pdfUrl(id)}" target="_blank" rel="noopener">${icons.eye}Open PDF in new tab</a>
+            <a class="btn" href="${api.pdfUrl(id)}" target="_blank" rel="noopener">${icons.print}Print / open PDF</a>
             ${canPay ? `<button class="btn" data-pay>${icons.rupee}Record payment</button>
                         <button class="btn" data-paid>${icons.check}Mark as paid</button>` : ""}
             ${inv.status === "Draft" ? `<button class="btn" data-issue>${icons.check}Issue invoice</button>` : ""}
             ${editable ? `<a class="btn" href="#/invoices/${id}/edit">${icons.edit}Edit invoice</a>` : ""}
+            <a class="btn" href="#/invoices/new?duplicate=${id}">${icons.copy}Duplicate</a>
             <button class="btn" data-regen data-busy="Regenerating…">${icons.doc}Regenerate PDF</button>
             ${inv.status !== "Cancelled" && Number(inv.amount_paid) === 0 ? `<button class="btn btn-danger" data-cancel>${icons.ban}Cancel invoice</button>` : ""}
             <button class="btn btn-danger" data-delete>${icons.trash}Delete invoice</button>
@@ -86,6 +87,7 @@ export async function render({ el, params, query, setTitle, navigate, isCurrent 
       </div>
     </div>`;
 
+  fitDocument(el.querySelector(".doc-shell"));
   const reload = () => render({ el, params, query: {}, setTitle, navigate, isCurrent });
   const on = (selector, handler) => el.querySelector(selector)?.addEventListener("click", handler);
 
@@ -93,25 +95,25 @@ export async function render({ el, params, query, setTitle, navigate, isCurrent 
   on("[data-paid]", async () => {
     const ok = await confirmDialog({ title: "Mark as paid?", message: `Record full payment of ${money(inv.balance_due)} for ${inv.invoice_number}?`, confirmText: "Mark as paid" });
     if (!ok) return;
-    try { await api.setInvoiceStatus(id, "Paid"); toast("Invoice marked as paid"); reload(); } catch (e) { toastError(e); }
+    try { await api.setInvoiceStatus(id, "Paid"); toast("Invoice marked as paid", "success", `${inv.invoice_number} is now fully paid.`); reload(); } catch (e) { toastError(e); }
   });
   on("[data-issue]", async () => {
-    try { await api.setInvoiceStatus(id, "Pending"); toast("Invoice issued"); reload(); } catch (e) { toastError(e); }
+    try { await api.setInvoiceStatus(id, "Pending"); toast("Invoice issued", "success", `${inv.invoice_number} now counts towards your sales.`); reload(); } catch (e) { toastError(e); }
   });
   on("[data-cancel]", async () => {
     const ok = await confirmDialog({ title: "Cancel invoice?", message: `${inv.invoice_number} will be marked as cancelled and excluded from sales. This cannot be undone.`, confirmText: "Cancel invoice", danger: true });
     if (!ok) return;
-    try { await api.setInvoiceStatus(id, "Cancelled"); toast("Invoice cancelled"); reload(); } catch (e) { toastError(e); }
+    try { await api.setInvoiceStatus(id, "Cancelled"); toast("Invoice cancelled", "success", `${inv.invoice_number} is no longer counted in sales.`); reload(); } catch (e) { toastError(e); }
   });
   on("[data-delete]", async () => {
     const ok = await confirmDialog({ title: "Delete invoice?", message: `${inv.invoice_number} and its PDF will be permanently deleted. Consider cancelling instead to keep a record.`, confirmText: "Delete permanently", danger: true });
     if (!ok) return;
-    try { await api.deleteInvoice(id); toast("Invoice deleted"); navigate("#/invoices"); } catch (e) { toastError(e); }
+    try { await api.deleteInvoice(id); toast("Invoice deleted", "success", `${inv.invoice_number} and its PDF were removed.`); navigate("#/invoices"); } catch (e) { toastError(e); }
   });
   on("[data-regen]", async (event) => {
     try {
       await withBusy(event.currentTarget, () => api.regeneratePdf(id));
-      toast("PDF regenerated");
+      toast("PDF generated", "success", `A fresh PDF for ${inv.invoice_number} is ready to download.`);
     } catch (e) { toastError(e); }
   });
 }

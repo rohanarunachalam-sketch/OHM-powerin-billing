@@ -1,5 +1,5 @@
 // Application shell: hash router, navigation state and unsaved-changes guard.
-import { esc } from "./js/utils.js";
+import { esc, icon } from "./js/utils.js";
 import { closeAllModals, confirmDialog, toastError } from "./js/ui.js";
 import { getSettings, setSettings } from "./js/store.js";
 import * as dashboard from "./js/views/dashboard.js";
@@ -19,6 +19,7 @@ const routes = [
   { pattern: /^\/invoices\/(\d+)\/edit$/, view: invoiceForm, nav: "invoices", keys: ["id"] },
   { pattern: /^\/invoices\/(\d+)$/, view: invoiceView, nav: "invoices", keys: ["id"] },
   { pattern: /^\/customers$/, view: customers, nav: "customers" },
+  { pattern: /^\/customers\/(\d+)$/, view: customers, nav: "customers", keys: ["id"] },
   { pattern: /^\/products$/, view: products, nav: "products" },
   { pattern: /^\/payments$/, view: payments, nav: "payments" },
   { pattern: /^\/reports$/, view: reports, nav: "reports" },
@@ -37,10 +38,13 @@ function parseHash() {
   return { path, query: Object.fromEntries(new URLSearchParams(queryString)) };
 }
 
+// Fill the static shell's icon placeholders from the shared icon set.
+document.querySelectorAll("[data-icon]").forEach((node) => { node.outerHTML = icon(node.dataset.icon); });
+
 function setTitle(title, crumb = "") {
   document.getElementById("page-title").textContent = title;
   document.getElementById("crumb").innerHTML = crumb;
-  document.title = `${title} · Billing`;
+  document.title = `${title} · OHM Powerin Billing`;
 }
 
 export function navigate(hash) {
@@ -64,8 +68,15 @@ async function render() {
   const match = route.pattern.exec(path);
   const params = Object.fromEntries((route.keys || []).map((key, i) => [key, match[i + 1]]));
 
-  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === route.nav));
+  document.querySelectorAll("[data-nav]").forEach((a) => {
+    const active = a.dataset.nav === route.nav;
+    a.classList.toggle("active", active);
+    if (active) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
+  document.body.dataset.route = route.nav;
   document.body.classList.remove("nav-open");
+  document.getElementById("menu-btn").setAttribute("aria-expanded", "false");
   closeAllModals();
   leaveGuard = null;
   window.scrollTo(0, 0);
@@ -87,8 +98,9 @@ async function render() {
   } catch (error) {
     if (token !== renderToken) return;
     console.error(error);
-    container.innerHTML = `<div class="card empty"><h3>Could not load this page</h3><p>${esc(error.message || "Unexpected error")}</p>
-      <button class="btn" onclick="location.reload()">Retry</button></div>`;
+    container.innerHTML = `<div class="card empty"><div class="empty-icon">${icon("alert")}</div><h3>This page could not be loaded</h3>
+      <p>Please check your connection and try again. If the problem continues, restart the application.</p>
+      <button class="btn" onclick="location.reload()">Try again</button></div>`;
   }
 }
 
@@ -123,7 +135,10 @@ window.addEventListener("beforeunload", (event) => {
   }
 });
 
-document.getElementById("menu-btn").addEventListener("click", () => document.body.classList.toggle("nav-open"));
+document.getElementById("menu-btn").addEventListener("click", (event) => {
+  const open = document.body.classList.toggle("nav-open");
+  event.currentTarget.setAttribute("aria-expanded", String(open));
+});
 document.getElementById("sidebar-backdrop").addEventListener("click", () => document.body.classList.remove("nav-open"));
 
 window.addEventListener("unhandledrejection", (event) => {

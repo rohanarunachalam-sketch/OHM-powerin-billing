@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 from pydantic import ValidationError
@@ -37,6 +38,7 @@ def _ensure_unique_sku(db: Session, sku: str, exclude_id: int | None = None) -> 
 @router.get("", response_model=Page)
 def list_products(
     q: str = Query("", max_length=100),
+    gst_rate: Decimal | None = Query(None, ge=0, le=100),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -48,6 +50,8 @@ def list_products(
         query = query.where(
             or_(Product.name.ilike(pattern), Product.sku.ilike(pattern), Product.hsn_sac.ilike(pattern))
         )
+    if gst_rate is not None:
+        query = query.where(Product.gst_rate == gst_rate)
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     if q:  # exact / prefix Part No matches first, then by name
         order = (

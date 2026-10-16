@@ -3,10 +3,10 @@ import { api } from "../api.js";
 import { getMeta, getSettings, stateName, stateOptions } from "../store.js";
 import { autocomplete, toast, toastError, withBusy } from "../ui.js";
 import {
-  calcLine, calcTotals, esc, icons, moneyFromPaise, todayISO, trimNumber,
+  calcLine, calcTotals, debounce, esc, icons, moneyFromPaise, todayISO, trimNumber,
 } from "../utils.js";
 import { openCustomerForm, openProductForm } from "./forms.js";
-import { renderInvoiceDocument } from "./invoice-doc.js";
+import { fitDocument, renderInvoiceDocument } from "./invoice-doc.js";
 
 const blankRow = () => ({
   product_id: null, part_no: "", name: "", description: "", hsn_sac: "", quantity: "1", unit: "Nos",
@@ -30,7 +30,7 @@ const isEmptyRow = (row) => !row.name.trim() && !String(row.rate).trim();
 
 export async function render({ el, params, query, setTitle, navigate, setLeaveGuard, isCurrent }) {
   const editingId = params.id ? Number(params.id) : null;
-  setTitle(editingId ? "Edit Invoice" : "New Invoice", `<a href="#/invoices">Invoices</a>`);
+  setTitle(editingId ? "Edit Invoice" : "Create Invoice", `<a href="#/invoices">Invoices</a>`);
 
   const [meta, settings] = await Promise.all([
     getMeta(), getSettings({ fresh: true }),
@@ -63,11 +63,13 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
   let saved = false;
   setLeaveGuard(() => dirty && !saved);
 
-  if (editingId) {
-    const inv = await api.invoice(editingId);
+  // "Duplicate" opens a new invoice pre-filled from an existing one (new number, today's date).
+  const duplicateId = !editingId && query.duplicate ? Number(query.duplicate) : null;
+  if (editingId || duplicateId) {
+    const inv = await api.invoice(editingId || duplicateId);
     if (!isCurrent()) return;
-    if (["Paid", "Partially Paid", "Cancelled"].includes(inv.status)) {
-      toast("Paid, partially paid or cancelled invoices cannot be edited.", "error");
+    if (editingId && ["Paid", "Partially Paid", "Cancelled"].includes(inv.status)) {
+      toast("This invoice can't be edited", "error", "Paid, partially paid or cancelled invoices are locked. Duplicate it to start a new one.");
       navigate(`#/invoices/${editingId}`);
       return;
     }
@@ -75,15 +77,15 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
     if (inv.customer_id) customer = await api.customer(inv.customer_id).catch(() => null);
     Object.assign(state, {
       customer,
-      invoice_number: inv.invoice_number,
+      invoice_number: editingId ? inv.invoice_number : settings.next_invoice_number,
       other_reference: inv.other_reference || "",
       contact_phone: inv.contact_phone || "",
       esn: inv.esn || "",
-      invoice_date: inv.invoice_date,
+      invoice_date: editingId ? inv.invoice_date : todayISO(),
       place_of_supply: inv.place_of_supply,
       notes: inv.notes,
       terms: inv.terms,
-      status: inv.status === "Draft" ? "Draft" : "Pending",
+      status: editingId && inv.status === "Draft" ? "Draft" : "Pending",
       items: inv.items.map((item) => ({
         product_id: item.product_id, part_no: item.part_no || "", name: item.name, description: item.description, hsn_sac: item.hsn_sac,
         quantity: trimNumber(item.quantity), unit: item.unit, rate: item.rate,
@@ -109,7 +111,11 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
   // -------------------------------------------------------------------------
 
   el.innerHTML = `
-    <div data-editor>
+    <div class="page-head">
+      <div><h2>${editingId ? "Edit Invoice" : duplicateId ? "Duplicate Invoice" : "Create Invoice"}</h2><p>${editingId ? "Update the details — totals are verified by the server when you save." : "Fill in the details on the left; the invoice preview updates as you type."}</p></div>
+    </div>
+    <div class="compose" data-editor>
+      <div data-form-col>
       <div class="card">
         <div class="card-header"><div><h2>Invoice details</h2><p>Bill to an existing customer or add a new one.</p></div><span data-supply></span></div>
         <div class="card-body">
@@ -123,9 +129,9 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
             <div class="form-grid">
               <div class="field"><label class="req" for="inv-number">Invoice number</label><input id="inv-number" data-field="invoice_number" maxlength="40"><div class="field-hint">Generated automatically. Type your own and the next one continues from it.</div></div>
               <div class="field"><label class="req" for="inv-date">Invoice date</label><input id="inv-date" type="date" data-field="invoice_date"></div>
-              <div class="field"><label for="inv-ref">Other reference</label><input id="inv-ref" data-field="other_reference" maxlength="100" placeholder="Shown as - if empty"></div>
-              <div class="field"><label for="inv-phone">Phone</label><input id="inv-phone" data-field="contact_phone" maxlength="100" placeholder="Shown as - if empty"></div>
-              <div class="field"><label for="inv-esn">ESN</label><input id="inv-esn" data-field="esn" maxlength="100" placeholder="Shown as - if empty"></div>
+              <div class="field"><label for="inv-ref">Other reference</label><input id="inv-ref" data-field="other_reference" maxlength="100" placeholder="Optional"></div>
+              <div class="field"><label for="inv-phone">Phone</label><input id="inv-phone" data-field="contact_phone" maxlength="100" placeholder="Optional"></div>
+              <div class="field"><label for="inv-esn">ESN</label><input id="inv-esn" data-field="esn" maxlength="100" placeholder="Optional"></div>
               <div class="field span-2"><label for="inv-pos">Place of supply</label>
                 <select id="inv-pos" data-field="place_of_supply">${stateOptions(meta.states, "", "Same as customer's state")}</select>
                 <div class="field-hint" data-pos-hint></div>
@@ -136,7 +142,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
       </div>
 
       <div class="card">
-        <div class="card-header"><div><h2>Items</h2><p>Type to search your products, or enter a one-off item.</p></div></div>
+        <div class="card-header"><div><h2>Items</h2><p>Type a part number or description to fill the row automatically, or enter a one-off item.</p></div></div>
         <div class="table-wrap">
           <table class="items-table">
             <thead><tr>
@@ -148,7 +154,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
           </table>
         </div>
         <div class="items-footer">
-          <button type="button" class="btn btn-sm" data-add-row>${icons.plus}Add row</button>
+          <button type="button" class="btn btn-sm" data-add-row>${icons.plus}Add Item</button>
           <button type="button" class="btn btn-sm btn-ghost" data-new-product>${icons.box}Create new product</button>
         </div>
       </div>
@@ -167,8 +173,16 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
         <a class="btn btn-ghost" href="${editingId ? `#/invoices/${editingId}` : "#/invoices"}">Cancel</a>
         <span class="spacer"></span>
         <button type="button" class="btn" data-save-draft data-busy="Saving…">Save as Draft</button>
-        <button type="button" class="btn btn-primary btn-lg" data-preview data-busy="Calculating…">${icons.eye}Preview Invoice</button>
+        <button type="button" class="btn" data-preview data-busy="Calculating…">${icons.eye}Full preview</button>
+        <button type="button" class="btn btn-primary btn-lg" data-save-main data-busy="Generating PDF…">${icons.check}${editingId ? "Save changes" : "Save & Generate PDF"}</button>
       </div>
+      </div>
+      <aside class="compose-preview" aria-label="Invoice preview">
+        <div class="card">
+          <div class="card-header"><div><h2>Live preview</h2><p>As it will appear on the PDF</p></div><span class="live-state" data-live-state></span></div>
+          <div class="live-frame" data-live data-fit-doc><div class="live-empty">Choose a customer and add an item to see the invoice here.</div></div>
+        </div>
+      </aside>
     </div>
     <div data-preview-pane hidden></div>`;
 
@@ -190,7 +204,19 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
 
   const markDirty = () => { dirty = true; };
 
+  // New invoices are dated today. If the form was left open past midnight and the user never touched the
+  // date, it is refreshed to the current date when the invoice is saved or previewed.
+  let dateTouched = Boolean(editingId);
+  const useCurrentDate = () => {
+    if (dateTouched) return;
+    const today = todayISO();
+    if (state.invoice_date !== today) {
+      state.invoice_date = today;
+      fields.invoice_date.value = today;
+    }
+  };
   fields.invoice_date.addEventListener("change", () => {
+    dateTouched = true;
     state.invoice_date = fields.invoice_date.value;
     markDirty();
   });
@@ -426,6 +452,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
       </div>
       ${t.valid ? "" : '<div class="calc-note" style="color:var(--danger)">Some rows have invalid numbers and are excluded.</div>'}
       <div class="calc-note">Final amounts are calculated and verified by the server when you preview or save.</div>`;
+    scheduleLive();
   }
 
   // -------------------------------------------------------------------------
@@ -462,13 +489,14 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
       if (rowValid && !calcLine(lineInput(row), false)) flag("discount_value", "discount cannot exceed the line amount.");
     });
     if (problems.length) {
-      toast(problems[0], "error");
+      toast("Please check the highlighted fields", "error", problems[0]);
       el.querySelector(".invalid")?.focus();
     }
     return !problems.length;
   }
 
   function payload(status) {
+    useCurrentDate();
     return {
       customer_id: state.customer.id,
       invoice_number: state.invoice_number.trim(),
@@ -496,13 +524,53 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
     };
   }
 
+  // -------------------------------------------------------------------------
+  // Live preview: the server calculates and renders exactly what will be saved
+  // -------------------------------------------------------------------------
+
+  const liveEl = $("[data-live]");
+  const liveState = $("[data-live-state]");
+  let liveToken = 0;
+
+  function readyForPreview() {
+    if (!state.customer || !state.invoice_date) return false;
+    const rows = state.items.filter((row) => !isEmptyRow(row));
+    return rows.length > 0 && rows.every((row) =>
+      row.name.trim() &&
+      /^\d+(\.\d{1,3})?$/.test(String(row.quantity).trim()) && Number(row.quantity) > 0 &&
+      /^\d+(\.\d{1,2})?$/.test(String(row.rate).trim()) &&
+      (!String(row.discount_value).trim() || /^\d+(\.\d{1,2})?$/.test(String(row.discount_value).trim())) &&
+      calcLine(lineInput(row), false));
+  }
+
+  const refreshLive = debounce(async () => {
+    if (!readyForPreview()) {
+      liveState.textContent = "";
+      if (!liveEl.querySelector(".doc")) liveEl.innerHTML = '<div class="live-empty">Choose a customer and add an item to see the invoice here.</div>';
+      return;
+    }
+    const token = ++liveToken;
+    liveState.innerHTML = '<span class="spinner"></span>Updating';
+    try {
+      const inv = await api.previewInvoice(payload("Pending"), editingId);
+      if (token !== liveToken || !isCurrent()) return;
+      liveEl.innerHTML = renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) });
+      fitDocument(liveEl);
+      liveState.textContent = "";
+    } catch {
+      if (token === liveToken) liveState.textContent = "Preview unavailable";
+    }
+  }, 700);
+  const scheduleLive = () => refreshLive();
+
   async function save(status, button) {
     if (!validate()) return;
     try {
       const invoice = await withBusy(button, () =>
         editingId ? api.updateInvoice(editingId, payload(status)) : api.createInvoice(payload(status)));
       saved = true;
-      toast(status === "Draft" ? `Draft ${invoice.invoice_number} saved` : `Invoice ${invoice.invoice_number} saved and PDF generated`);
+      toast(status === "Draft" ? "Draft saved" : editingId ? "Invoice updated" : "Invoice created successfully", "success",
+        status === "Draft" ? `${invoice.invoice_number} was saved as a draft.` : `Invoice ${invoice.invoice_number} has been saved and its PDF generated.`);
       navigate(`#/invoices/${invoice.id}${editingId ? "" : "?created=1"}`);
     } catch (error) {
       toastError(error);
@@ -530,7 +598,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
     setTitle(`Preview · ${inv.invoice_number}`, `<a href="#/invoices">Invoices</a>`);
     pane.innerHTML = `
       <div class="banner banner-info no-print">${icons.info}<div><b>Preview — not saved yet.</b> These totals were calculated by the server exactly as they will be stored. Review, then save to generate the A4 PDF.</div></div>
-      <div class="doc-shell">${renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) })}</div>
+      <div class="doc-shell" data-fit-doc>${renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) })}</div>
       <div class="sticky-footer no-print">
         <button type="button" class="btn" data-back>${icons.back}Back to edit</button>
         <span class="spacer"></span>
@@ -538,6 +606,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
         <button type="button" class="btn btn-primary btn-lg" data-save data-busy="Generating PDF…">${icons.download}Save &amp; Generate PDF</button>
       </div>`;
     window.scrollTo(0, 0);
+    fitDocument(pane.querySelector(".doc-shell"));
     pane.querySelector("[data-back]").addEventListener("click", () => {
       pane.hidden = true;
       pane.innerHTML = "";
@@ -550,6 +619,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
 
   $("[data-preview]").addEventListener("click", (e) => showPreview(e.currentTarget));
   $("[data-save-draft]").addEventListener("click", (e) => save("Draft", e.currentTarget));
+  $("[data-save-main]").addEventListener("click", (e) => save("Pending", e.currentTarget));
 
   renderCustomer();
   refreshSupply();

@@ -19,8 +19,11 @@ export async function getSettings({ fresh = false } = {}) {
 
 export function setSettings(settings) {
   settingsCache = settings;
-  const brand = document.getElementById("brand-business");
-  if (brand) brand.textContent = settings.business_name || "GST Invoicing";
+  const name = settings.business_name || "Your business";
+  const set = (id, text) => { const node = document.getElementById(id); if (node) node.textContent = text; };
+  set("account-name", name);
+  set("account-sub", settings.gstin ? `GSTIN ${settings.gstin}` : settings.business_name ? "GST billing" : "Set up in Settings");
+  set("account-avatar", name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "OP");
 }
 
 export function stateOptions(states, selected = "", placeholder = "Select state") {

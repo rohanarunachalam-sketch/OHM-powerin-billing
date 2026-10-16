@@ -136,6 +136,8 @@ class CustomerOut(ORMModel):
     created_at: datetime | None
     invoice_count: int = 0
     total_billed: Decimal = Decimal("0")
+    total_paid: Decimal = Decimal("0")
+    outstanding: Decimal = Decimal("0")
 
 
 # ---------------------------------------------------------------------------

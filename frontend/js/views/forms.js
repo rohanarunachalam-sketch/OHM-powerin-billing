@@ -1,7 +1,7 @@
 // Customer and product forms, opened as modals from several screens.
 import { api } from "../api.js";
 import { getMeta, stateOptions } from "../store.js";
-import { checkRequired, fillForm, formValues, openModal, setFieldError, toast, withBusy } from "../ui.js";
+import { checkRequired, fillForm, formValues, openModal, setFieldError, toast, toastError, withBusy } from "../ui.js";
 import { esc, GSTIN_PATTERN, trimNumber } from "../utils.js";
 
 /** Show backend validation errors next to the matching field when possible. */
@@ -99,10 +99,10 @@ export async function openCustomerForm(customer = null, { prefillName = "" } = {
         await withBusy(button, async () => {
           saved = customer ? await api.updateCustomer(customer.id, data) : await api.createCustomer(data);
         });
-        toast(customer ? "Customer updated" : `Customer “${saved.name}” created`);
+        toast(customer ? "Customer updated" : "Customer created", "success", `${saved.company_name || saved.name} has been saved.`);
         close();
       } catch (error) {
-        if (!showServerError(form, error, CUSTOMER_LABELS)) toast(error.message, "error");
+        if (!showServerError(form, error, CUSTOMER_LABELS)) toastError(error);
       }
     });
   });
@@ -161,10 +161,10 @@ export async function openProductForm(product = null, { prefillName = "" } = {})
         await withBusy(button, async () => {
           saved = product ? await api.updateProduct(product.id, data) : await api.createProduct(data);
         });
-        toast(product ? "Product updated" : `“${saved.name}” added`);
+        toast(product ? "Product updated" : "Product added", "success", `${saved.name} has been saved.`);
         close();
       } catch (error) {
-        if (!showServerError(form, error, PRODUCT_LABELS)) toast(error.message, "error");
+        if (!showServerError(form, error, PRODUCT_LABELS)) toastError(error);
       }
     });
   });

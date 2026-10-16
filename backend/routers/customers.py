@@ -33,12 +33,13 @@ def _with_stats(db: Session, customers: list[Customer]) -> list[CustomerOut]:
         return []
     ids = [c.id for c in customers]
     stats = {
-        row.customer_id: (row.count, row.total)
+        row.customer_id: (row.count, row.total, row.paid)
         for row in db.execute(
             select(
                 Invoice.customer_id,
                 func.count(Invoice.id).label("count"),
                 func.sum(Invoice.grand_total).label("total"),
+                func.sum(Invoice.amount_paid).label("paid"),
             )
             .where(Invoice.customer_id.in_(ids), Invoice.status.notin_([InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED]))
             .group_by(Invoice.customer_id)
@@ -46,10 +47,12 @@ def _with_stats(db: Session, customers: list[Customer]) -> list[CustomerOut]:
     }
     out = []
     for customer in customers:
-        count, total = stats.get(customer.id, (0, Decimal("0")))
+        count, total, paid = stats.get(customer.id, (0, Decimal("0"), Decimal("0")))
         item = CustomerOut.model_validate(customer)
         item.invoice_count = count
         item.total_billed = total or Decimal("0")
+        item.total_paid = paid or Decimal("0")
+        item.outstanding = item.total_billed - item.total_paid
         out.append(item)
     return out
 

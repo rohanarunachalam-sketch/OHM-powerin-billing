@@ -62,9 +62,9 @@ billing-software/
 │       ├── settings_service.py
 │       └── states.py         # Indian GST state codes
 ├── frontend/
-│   ├── index.html  style.css  app.js   # shell, styles, router
+│   ├── index.html  style.css  doc.css  app.js   # shell, design system, invoice preview styles, router
 │   └── js/
-│       ├── api.js  ui.js  utils.js  store.js
+│       ├── api.js  ui.js  utils.js  store.js  icons.js
 │       └── views/            # dashboard, invoices, invoice-form, invoice-view,
 │                             # invoice-doc, customers, products, payments,
 │                             # reports, settings, forms
@@ -149,20 +149,34 @@ python -m backend.seed
 
 1. When an invoice is saved, `invoice_service` stores the calculated values and calls
    `pdf_generator.generate_invoice_pdf`.
-2. The generator builds the document with ReportLab **platypus** flowables — paragraphs and
-   tables, not a screenshot — on `reportlab.lib.pagesizes.A4` (595.28 × 841.89 pt =
-   210 × 297 mm) with 14 mm side margins.
-3. Layout: logo and business header → *TAX INVOICE* band → Bill To / Ship To with invoice
-   details → items table → amount in words, GST-rate breakup and totals → notes and terms →
-   bank details and signature block → footer with **Page X of Y**.
-4. Long names, addresses and descriptions wrap inside their cells; long item lists flow onto
-   further pages with the table header repeated; the totals and signature blocks are kept
-   together. All user text is escaped before it reaches ReportLab's markup parser.
-5. A TTF font with the **₹** glyph is auto-detected (Arial on Windows; DejaVu/Liberation on
+2. The document is drawn with ReportLab canvas primitives (text, rules, shapes), not a
+   screenshot, on a true A4 page (210 × 297 mm). **All amounts come from the backend**
+   (`InvoiceOut`); the PDF code never recalculates tax or totals.
+3. Layout lives in a template class. `InvoiceTemplate` holds the drawing primitives, pagination
+   and page frame; `CorporateTemplate` (the default) draws the classic GST sections in a grey-scale-safe layout inside
+   one frame: logos, business details and *Tax Invoice* with invoice details, Consignee / Shipped To,
+   the item table, OUTPUT CGST/SGST and **Total**, amount in words, the tax summary, declaration, bank
+   details, signature and the contact footer. It uses only black and greys (the logos keep their own
+   colours), so it prints identically in colour and black-and-white.
+4. To add a template, subclass `InvoiceTemplate`, implement its sections and register it in
+   `TEMPLATES` (`generate_invoice_pdf(..., template="name")`). 
+5. Long item lists flow onto further pages with the table header repeated and a "Continued…"
+   note; the totals/signature block stays together on the last page. 
+6. A TTF font with the **₹** glyph is auto-detected (Arial on Windows; DejaVu/Liberation on
    Linux; Arial on macOS). If none is found the PDF falls back to Helvetica and prints "Rs.".
-6. The file is written atomically to `invoices/<invoice-number>.pdf`.
+7. The file is written atomically to `invoices/<invoice-number>.pdf`.
    `GET /api/invoices/{id}/pdf` serves it inline; `?download=true` forces a download. If the
    file is missing it is regenerated from the stored invoice.
+
+The on-screen invoice preview (`frontend/js/views/invoice-doc.js` + `frontend/doc.css`) mirrors
+this layout using the same server-calculated values.
+
+## Design system
+
+`frontend/style.css` starts with the design tokens (colours, spacing scale, radii, shadows,
+type scale); change them there and the whole app follows. Icons are a vendored
+[Lucide](https://lucide.dev) subset in `frontend/js/icons.js` (no runtime dependency). The only
+external request is the optional Inter web font; the UI falls back to the system font offline.
 
 ---
 
@@ -170,10 +184,12 @@ python -m backend.seed
 
 | Method | Path | |
 |---|---|---|
-| GET | `/api/dashboard` | dashboard numbers and recent invoices |
+| GET | `/api/dashboard` | dashboard numbers, outstanding, collection %, recent invoices |
+| GET | `/api/dashboard/overview` | sales for `?date_from=&date_to=` (default 30 days), previous-period comparison, chart series, outstanding customers |
 | GET/POST | `/api/customers` | list (`?q=`) / create |
 | GET/PUT/DELETE | `/api/customers/{id}` | |
-| GET/POST | `/api/products` | list (`?q=`) / create |
+| GET/POST | `/api/products` | list (`?q=&gst_rate=&limit=&offset=`) / create |
+| POST | `/api/products/import` | add/update from an `.xlsx` or CSV price list (matched on Part No) |
 | GET/PUT/DELETE | `/api/products/{id}` | |
 | GET/POST | `/api/invoices` | list (`?q=&status=&date_from=&date_to=&customer_id=`) / create |
 | POST | `/api/invoices/preview` | calculate without saving |

@@ -1,32 +1,41 @@
 import { api } from "../api.js";
-import { confirmDialog, emptyState, searchBox, toast, toastError } from "../ui.js";
+import { getMeta } from "../store.js";
+import { confirmDialog, emptyState, openModal, searchBox, skeletonTable, toast, toastError } from "../ui.js";
 import { debounce, esc, icons, money, trimNumber } from "../utils.js";
 import { openProductForm } from "./forms.js";
 
+const PAGE_SIZE = 100;
+
 export async function render({ el, setTitle, isCurrent }) {
-  setTitle("Products & Services", "Sales");
+  const meta = await getMeta();
+  setTitle("Products");
   el.innerHTML = `
     <div class="page-head">
-      <div><p>Your catalogue of goods and services with HSN/SAC codes and GST rates.</p></div>
-      <div class="page-actions"><input type="file" accept=".csv,.xlsx,text/csv" data-import-file hidden><button class="btn" data-import title="Columns: Part No, Description of Goods, HSN/SAC, Unit, Price, GST %">${icons.upload}Import Excel/CSV</button><button class="btn btn-primary" data-new>${icons.plus}New Item</button></div>
+      <div><h2>Products &amp; Services</h2><p>Your catalogue of goods and services with HSN/SAC codes and GST rates.</p></div>
+      <div class="page-actions"><input type="file" accept=".csv,.xlsx,text/csv" data-import-file hidden><button class="btn" data-import title="Columns: Part No, Description of Goods, HSN/SAC, Unit, Price, GST %">${icons.upload}Import Excel/CSV</button><button class="btn btn-primary" data-new>${icons.plus}Add Item</button></div>
     </div>
     <div class="card">
-      <div class="toolbar">${searchBox("Search by part no, name or HSN/SAC")}<span class="result-count" data-count></span></div>
-      <div data-list><div class="loading"><span class="spinner"></span>Loading…</div></div>
+      <div class="toolbar">${searchBox("Search by part no, name or HSN/SAC")}
+        <select data-gst aria-label="Filter by GST rate"><option value="">All GST rates</option>${meta.gst_rates.map((r) => `<option value="${esc(r)}">${esc(trimNumber(r))}%</option>`).join("")}</select>
+        <span class="result-count" data-count></span></div>
+      <div data-list>${skeletonTable(7)}</div>
+      <div class="items-footer" data-more hidden><button class="btn btn-sm" data-load-more>Load more</button></div>
     </div>`;
 
   const listEl = el.querySelector("[data-list]");
   const search = el.querySelector("[data-search]");
   let items = [];
 
-  async function load() {
+  async function load(append = false) {
     const q = search.value.trim();
-    const page = await api.products({ q, limit: 1000 });
+    const gst = el.querySelector("[data-gst]").value;
+    const page = await api.products({ q, gst_rate: gst, limit: PAGE_SIZE, offset: append ? items.length : 0 });
     if (!isCurrent()) return;
-    items = page.items;
+    items = append ? items.concat(page.items) : page.items;
+    el.querySelector("[data-more]").hidden = items.length >= page.total;
     el.querySelector("[data-count]").textContent = `${page.total} item${page.total === 1 ? "" : "s"}`;
     if (!items.length) {
-      listEl.innerHTML = q
+      listEl.innerHTML = q || gst
         ? emptyState({ icon: icons.search, title: "No items found", text: `Nothing matches “${q}”.` })
         : emptyState({
             icon: icons.box, title: "No products or services yet",
@@ -37,7 +46,7 @@ export async function render({ el, setTitle, isCurrent }) {
     }
     listEl.innerHTML = `
       <div class="table-wrap"><table class="table">
-        <thead><tr><th>Name</th><th class="hide-sm">Part No</th><th>HSN/SAC</th><th class="hide-sm">Unit</th><th class="num">Price</th><th class="num">GST</th><th class="actions"></th></tr></thead>
+        <thead><tr><th scope="col">Product</th><th scope="col" class="hide-sm">SKU / Part No</th><th scope="col">HSN/SAC</th><th scope="col" class="hide-sm">Unit</th><th scope="col" class="num">Price</th><th scope="col" class="num">GST rate</th><th scope="col" class="actions"><span class="sr-only">Actions</span></th></tr></thead>
         <tbody>${items.map((p) => `
           <tr>
             <td><div class="strong">${esc(p.name)}</div>${p.description ? `<div class="sub">${esc(p.description.length > 80 ? p.description.slice(0, 80) + "…" : p.description)}</div>` : ""}</td>
@@ -47,8 +56,8 @@ export async function render({ el, setTitle, isCurrent }) {
             <td class="num">${money(p.price)}</td>
             <td class="num">${trimNumber(p.gst_rate)}%</td>
             <td class="actions">
-              <button class="icon-btn" data-edit="${p.id}" title="Edit" aria-label="Edit">${icons.edit}</button>
-              <button class="icon-btn danger" data-delete="${p.id}" title="Delete" aria-label="Delete">${icons.trash}</button>
+              <button class="icon-btn" data-edit="${p.id}" title="Edit" aria-label="Edit ${esc(p.name)}">${icons.edit}</button>
+              <button class="icon-btn danger" data-delete="${p.id}" title="Delete" aria-label="Delete ${esc(p.name)}">${icons.trash}</button>
             </td>
           </tr>`).join("")}
         </tbody></table></div>`;
@@ -91,12 +100,14 @@ export async function render({ el, setTitle, isCurrent }) {
       if (!ok) return;
       try {
         await api.deleteProduct(product.id);
-        toast("Item deleted");
+        toast("Item deleted", "success", `${product.name} was removed from your catalogue.`);
         load();
       } catch (error) { toastError(error); }
     }
   });
 
-  search.addEventListener("input", debounce(load, 250));
+  search.addEventListener("input", debounce(() => load(), 250));
+  el.querySelector("[data-gst]").addEventListener("change", () => load());
+  el.querySelector("[data-load-more]").addEventListener("click", () => load(true));
   await load();
 }

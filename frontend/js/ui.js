@@ -5,17 +5,32 @@ import { esc, icons } from "./utils.js";
 // Toasts
 // ---------------------------------------------------------------------------
 
-export function toast(message, type = "success") {
+/**
+ * Show a notification. `message` is the headline; `detail` is an optional second line.
+ * Errors stay longer and are announced to screen readers immediately.
+ */
+export function toast(message, type = "success", detail = "") {
   const root = document.getElementById("toast-root");
   const el = document.createElement("div");
   el.className = `toast ${type}`;
   el.setAttribute("role", type === "error" ? "alert" : "status");
-  el.innerHTML = `${type === "error" ? icons.alert : icons.check}<div>${esc(message)}</div>`;
+  el.innerHTML = `${type === "error" ? icons.alert : icons.checkCircle}
+    <div><div class="toast-title">${esc(message)}</div>${detail ? `<div class="toast-detail">${esc(detail)}</div>` : ""}</div>
+    <button type="button" class="icon-btn toast-close" aria-label="Dismiss">${icons.close}</button>`;
   root.appendChild(el);
-  setTimeout(() => el.remove(), type === "error" ? 6000 : 3500);
+  const remove = () => el.remove();
+  el.querySelector(".toast-close").addEventListener("click", remove);
+  setTimeout(remove, type === "error" ? 7000 : 4000);
 }
 
-export const toastError = (error) => toast(error?.message || "Something went wrong.", "error");
+/** Never show raw server/network internals: validation-style messages pass through, everything else is generic. */
+export function toastError(error) {
+  const status = error?.status;
+  const friendly = status >= 400 && status < 500 && error?.message && !/^Request failed/.test(error.message);
+  if (status === 0) toast("Can't reach the server", "error", "Check that the application is running, then try again.");
+  else if (friendly) toast(status === 422 ? "Please check the highlighted fields" : "That didn't work", "error", error.message);
+  else toast("Something went wrong", "error", "Please try again. If it keeps happening, restart the application.");
+}
 
 // ---------------------------------------------------------------------------
 // Modals
@@ -246,5 +261,73 @@ export function emptyState({ icon = icons.doc, title, text, actionHtml = "" }) {
 }
 
 export function searchBox(placeholder, value = "") {
-  return `<div class="search">${icons.search}<input type="search" placeholder="${esc(placeholder)}" value="${esc(value)}" data-search></div>`;
+  return `<div class="search">${icons.search}<input type="search" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" value="${esc(value)}" data-search></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Skeleton loading states
+// ---------------------------------------------------------------------------
+
+export const skeletonStats = (n = 4) => `<div class="sk-stats" aria-hidden="true">${Array.from({ length: n }, () =>
+  `<div class="card sk-card"><div class="skeleton sk-line sm"></div><div class="skeleton sk-line lg"></div><div class="skeleton sk-line sm"></div></div>`).join("")}</div>`;
+
+export const skeletonTable = (rows = 6) => `<div aria-hidden="true">${Array.from({ length: rows }, () =>
+  `<div class="sk-row"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`).join("")}</div>`;
+
+export const loadingLabel = '<span class="sr-only" role="status">Loading</span>';
+
+// ---------------------------------------------------------------------------
+// Row action menu (three-dot)
+// ---------------------------------------------------------------------------
+
+/**
+ * items: [{ label, icon, action?, href?, download?, danger?, sep? }]. Buttons carry data-action; links keep their href.
+ * Pair with bindMenus(container) once per container.
+ */
+export function actionMenu(items, { label = "Actions" } = {}) {
+  const body = items.filter(Boolean).map((item) => {
+    if (item.sep) return '<div class="menu-sep" role="separator"></div>';
+    const cls = `menu-item${item.danger ? " danger" : ""}`;
+    const inner = `${icons[item.icon] || ""}${esc(item.label)}`;
+    if (item.href) {
+      return `<a class="${cls}" role="menuitem" href="${esc(item.href)}"${item.download ? " download" : ""}${item.blank ? ' target="_blank" rel="noopener"' : ""} data-menu-link>${inner}</a>`;
+    }
+    return `<button type="button" class="${cls}" role="menuitem" data-action="${esc(item.action)}">${inner}</button>`;
+  }).join("");
+  return `<div class="menu"><button type="button" class="icon-btn" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="${esc(label)}">${icons.more}</button>
+    <div class="menu-list" role="menu" hidden>${body}</div></div>`;
+}
+
+let menuListenersBound = false;
+function closeMenus(except) {
+  document.querySelectorAll(".menu-list:not([hidden])").forEach((list) => {
+    if (list === except) return;
+    list.hidden = true;
+    list.parentElement.querySelector("[data-menu-toggle]")?.setAttribute("aria-expanded", "false");
+  });
+}
+
+/** Opens/closes menus inside `container`; closes on outside click, Escape or after choosing an item. */
+export function bindMenus(container) {
+  if (!menuListenersBound) {
+    menuListenersBound = true;
+    document.addEventListener("click", (event) => { if (!event.target.closest(".menu")) closeMenus(); });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenus(); });
+  }
+  container.addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-menu-toggle]");
+    if (toggle) {
+      event.stopPropagation();
+      const list = toggle.parentElement.querySelector(".menu-list");
+      closeMenus(list);
+      const open = list.hidden;
+      list.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      // Open upwards when there is no room below (last rows of a table).
+      list.classList.toggle("up", open && toggle.getBoundingClientRect().bottom + list.offsetHeight + 12 > window.innerHeight);
+      if (open) list.querySelector(".menu-item")?.focus();
+      return;
+    }
+    if (event.target.closest(".menu-item")) closeMenus();
+  });
 }

@@ -1,7 +1,8 @@
 """A4 tax-invoice PDF rendering with ReportLab.
 
-The document is built from real PDF primitives (text, tables, vector lines), not a
-screenshot, on a true A4 page (210 mm x 297 mm).
+The document is built from real PDF primitives (text, rules, shapes), not a screenshot, on a true
+A4 page (210 mm x 297 mm). Layout lives in template classes (see InvoiceTemplate / CorporateTemplate);
+all amounts come from the backend InvoiceOut, nothing is recalculated here.
 """
 from __future__ import annotations
 
@@ -29,14 +30,8 @@ from .services.calculations import amount_in_words
 logger = logging.getLogger("billing.pdf")
 
 PAGE_W, PAGE_H = 210.0, 297.0  # mm
-MARGIN = 8.0
-BOX_W = PAGE_W - 2 * MARGIN
-BOX_BOTTOM_LIMIT = 273.0  # the bordered invoice never extends below this (footer strip sits under it)
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "frontend" / "assets" / "icons"
-BLUE = colors.HexColor("#1f6fb5")
-INK = colors.black
-GREY = colors.HexColor("#555555")
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +118,7 @@ def format_date(value: date | None) -> str:
     return value.strftime("%d-%m-%Y") if value else "-"
 
 
+
 # ---------------------------------------------------------------------------
 # Invoice document
 # ---------------------------------------------------------------------------
@@ -132,25 +128,18 @@ DECLARATION = (
     "and that all particulars are true and correct"
 )
 
-# (header, width mm, alignment) for the goods table; widths add up to BOX_W (194 mm).
-_COLUMNS = (
-    ("S No", 10, "c"),
-    ("Part No", 26, "l"),
-    ("Description of Goods", 42, "l"),
-    ("HSN/SAC", 18, "c"),
-    ("GST %", 11, "c"),
-    ("Quantity", 16, "r"),
-    ("Rate", 21, "r"),
-    ("Per", 10, "c"),
-    ("Disc.", 14, "r"),
-    ("Amount", 26, "r"),
-)
-_LINE_H = 3.7  # mm between text lines at 8pt
-_ROW_PAD = 1.4
-_REF_H = 6.0  # each "Other Reference / Phone / ESN" row
-_HEAD_H = 6.0  # goods table header row
-_TOTAL_ROW_H = 6.0
-_CONTINUED_H = 6.0
+# Greys only: the invoice must look the same in colour and in black-and-white.
+DARK = colors.HexColor("#1a1a1a")      # major borders, titles
+TEXT = colors.HexColor("#111111")
+SOFT = colors.HexColor("#4a4a4a")      # secondary text
+MID = colors.HexColor("#9a9a9a")       # section rules
+LIGHT = colors.HexColor("#cfcfcf")     # table lines
+FILL_HEAD = colors.HexColor("#e4e4e4")  # table / tax-summary headers
+FILL_BAND = colors.HexColor("#f0f0f0")  # section labels, total row
+WHITE = colors.white
+
+LEAD = 3.7           # line height at 8 pt (mm)
+CONTINUED_H = 6.0    # "Continued on next page" row
 
 Line = tuple[str, bool, float]  # (text, bold, font size)
 
@@ -159,7 +148,7 @@ def _wrap(text: str, font: str, size: float, width_mm: float) -> list[str]:
     """Word-wrap `text` (honouring newlines) into lines no wider than `width_mm`."""
     max_w = width_mm * mm
     lines: list[str] = []
-    for paragraph in (text or "").split("\n"):
+    for paragraph in str(text).split("\n"):
         current = ""
         for word in paragraph.split():
             while stringWidth(word, font, size) > max_w:  # break over-long words
@@ -171,73 +160,268 @@ def _wrap(text: str, font: str, size: float, width_mm: float) -> list[str]:
                     current = ""
                 lines.append(word[:cut])
                 word = word[cut:]
-            trial = f"{current} {word}".strip()
-            if current and stringWidth(trial, font, size) > max_w:
+            candidate = f"{current} {word}".strip()
+            if stringWidth(candidate, font, size) <= max_w:
+                current = candidate
+            else:
                 lines.append(current)
                 current = word
-            else:
-                current = trial
         lines.append(current)
     return lines or [""]
 
 
-class InvoicePDF:
+class InvoiceTemplate:
+    """Base class: drawing primitives, pagination and the page loop shared by every template.
+
+    A template sets the page geometry (`left`, `right`, `top`, `bottom`, `head_h`) and implements the
+    sections: `header_first`, `header_continued`, `parties`, `draw_table_head`, `make_row` / `row_height` /
+    `draw_row`, `draw_columns`, `footer` and the per-page `draw_frame` / `draw_page_footer`.
+    Section methods return the height they used and respect `self.dry` (measure only), so the same code
+    both plans and draws a page. To add a template, subclass this and register it in TEMPLATES.
+    """
+
+    name = "base"
+    left, right = 10.0, 200.0
+    top, bottom = 10.0, 274.0   # content area; the template may draw a frame / page footer outside it
+    head_h = 8.0                # goods-table header row
+    anchor_footer = True        # last-page footer sits at the bottom, the item area stretches to fill
+
     def __init__(self, invoice: InvoiceOut, logo: Path | list[Path] | None = None, logo_heights: list[float] | None = None) -> None:
         self.invoice = invoice
         self.logos: list[Path] = [logo] if isinstance(logo, Path) else list(logo or [])
         self.logo_heights: list[float] = list(logo_heights or [])
         self.regular, self.bold, self.currency = _fonts()
         self.c: pdf_canvas.Canvas
-        self.columns: list[tuple[str, float, float, str]] = []  # (header, x0, x1, align), mm
-        x = MARGIN
-        for header, width, align in _COLUMNS:
-            self.columns.append((header, x, x + width, align))
-            x += width
+        self.dry = False
+        self.footer_h = 0.0
 
-    # -- drawing primitives (coordinates in mm, y measured from the top) ----------------
+    @property
+    def width_mm(self) -> float:
+        return self.right - self.left
+
+    # -- drawing primitives (mm; y measured from the top) -------------------------------------
 
     def _y(self, y: float) -> float:
         return (PAGE_H - y) * mm
 
-    def line(self, x1: float, y1: float, x2: float, y2: float, width: float = 0.5) -> None:
+    def line(self, x1: float, y1: float, x2: float, y2: float, width: float = 0.5, color=DARK) -> None:
+        if self.dry:
+            return
         self.c.setLineWidth(width)
-        self.c.setStrokeColor(INK)
+        self.c.setStrokeColor(color)
         self.c.line(x1 * mm, self._y(y1), x2 * mm, self._y(y2))
 
+    def rect(self, x: float, y: float, w: float, h: float, fill=None, stroke=None, width: float = 0.5) -> None:
+        if self.dry:
+            return
+        self.c.setLineWidth(width)
+        if fill is not None:
+            self.c.setFillColor(fill)
+        if stroke is not None:
+            self.c.setStrokeColor(stroke)
+        self.c.rect(x * mm, self._y(y + h), w * mm, h * mm, stroke=int(stroke is not None), fill=int(fill is not None))
+
     def text(self, x: float, y: float, value: str, size: float = 8, bold: bool = False,
-             align: str = "l", color=INK) -> None:
-        """Draw text with its baseline at `y`; `x` is the left, centre or right edge per `align`."""
+             align: str = "l", color=TEXT) -> None:
+        """Draw text whose *top* is at `y`; `x` is the left, centre or right edge according to `align`."""
+        if self.dry:
+            return
+        baseline = y + size * 0.3528 * 0.82
         self.c.setFillColor(color)
         self.c.setFont(self.bold if bold else self.regular, size)
         if align == "c":
-            self.c.drawCentredString(x * mm, self._y(y), value)
+            self.c.drawCentredString(x * mm, self._y(baseline), value)
         elif align == "r":
-            self.c.drawRightString(x * mm, self._y(y), value)
+            self.c.drawRightString(x * mm, self._y(baseline), value)
         else:
-            self.c.drawString(x * mm, self._y(y), value)
+            self.c.drawString(x * mm, self._y(baseline), value)
 
-    def block(self, x: float, y: float, lines: list[Line], width: float, align: str = "l") -> None:
-        """Draw wrapped lines starting at top `y` inside a column `width` wide."""
-        cursor = y + 3.2
-        for value, bold, size in lines:
-            for piece in _wrap(value, self.bold if bold else self.regular, size, width - 3.2):
-                if align == "c":
-                    self.text(x + width / 2, cursor, piece, size, bold, "c")
-                else:
-                    self.text(x + 1.6, cursor, piece, size, bold)
-                cursor += _LINE_H * size / 8
+    def tw(self, value: str, size: float, bold: bool = False) -> float:
+        return stringWidth(value, self.bold if bold else self.regular, size) / mm
 
-    def block_height(self, lines: list[Line], width: float) -> float:
-        total = 0.0
-        for value, bold, size in lines:
-            count = len(_wrap(value, self.bold if bold else self.regular, size, width - 3.2))
-            total += count * _LINE_H * size / 8
-        return total + 1.6
+    def para(self, x: float, y: float, value: str, w: float, size: float = 8, bold: bool = False,
+             color=TEXT, align: str = "l", leading: float | None = None) -> float:
+        """Draw wrapped text inside a column `w` wide; returns the height used."""
+        leading = leading or size * 0.3528 * 1.42
+        pieces = _wrap(value, self.bold if bold else self.regular, size, w)
+        for n, piece in enumerate(pieces):
+            tx = {"l": x, "c": x + w / 2, "r": x + w}[align]
+            self.text(tx, y + n * leading, piece, size, bold, align, color)
+        return len(pieces) * leading
+
+    def para_h(self, value: str, w: float, size: float = 8, bold: bool = False, leading: float | None = None) -> float:
+        leading = leading or size * 0.3528 * 1.42
+        return len(_wrap(value, self.bold if bold else self.regular, size, w)) * leading
 
     def money(self, value: Decimal) -> str:
         return format_indian(value)
 
-    # -- content --------------------------------------------------------------------------
+    # -- template contract -----------------------------------------------------------------------
+
+    def header_first(self) -> float:
+        raise NotImplementedError
+
+    def header_continued(self, number: int, count: int) -> float:
+        raise NotImplementedError
+
+    def parties(self, y: float) -> float:
+        raise NotImplementedError
+
+    def make_row(self, index: int, item) -> dict:
+        raise NotImplementedError
+
+    def row_height(self, row: dict) -> float:
+        raise NotImplementedError
+
+    def draw_row(self, y: float, row: dict) -> None:
+        raise NotImplementedError
+
+    def draw_table_head(self, y: float) -> None:
+        raise NotImplementedError
+
+    def draw_columns(self, y0: float, y1: float) -> None:
+        """Vertical column rules between y0 and y1 (the item area, including any stretched filler)."""
+
+    def footer(self, y: float) -> float:
+        raise NotImplementedError
+
+    def draw_frame(self, number: int, count: int) -> None:
+        """Page border, drawn last on every page."""
+
+    def draw_page_footer(self) -> None:
+        """Per-page footer (contact strip)."""
+
+    # -- pagination ----------------------------------------------------------------------------------
+
+    @staticmethod
+    def _paginate(rows: list[dict], first_cap: float, next_cap: float, continued_h: float, last_reserve: float) -> list[list[dict]]:
+        """Split rows into pages. Every page but the last keeps room for 'Continued…'; the last keeps room for the footer."""
+        pages: list[list[dict]] = []
+        remaining = list(rows)
+        while True:
+            cap = first_cap if not pages else next_cap
+            if sum(r["height"] for r in remaining) <= cap + continued_h - last_reserve:
+                pages.append(remaining)
+                return pages
+            chunk: list[dict] = []
+            used = 0.0
+            while remaining and (not chunk or used + remaining[0]["height"] <= cap):
+                used += remaining[0]["height"]
+                chunk.append(remaining.pop(0))
+            if not remaining:
+                # everything fits on a plain page but not together with the footer: carry the last row over
+                remaining = [chunk.pop()] if len(chunk) > 1 else []
+            pages.append(chunk)
+            if not remaining:
+                pages.append([])  # footer alone on its own page
+                return pages
+
+    # -- build -------------------------------------------------------------------------------------------
+
+    def build(self, target: Path) -> Path:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
+        inv = self.invoice
+        self.c = pdf_canvas.Canvas(str(tmp), pagesize=A4)
+        self.c.setTitle(f"Tax Invoice {inv.invoice_number}")
+        self.c.setAuthor(inv.business.get("business_name", ""))
+        self.c.setSubject(f"Invoice for {inv.customer.get('display_name', '')}")
+        self.c.setCreator("OHM Powerin Billing")
+
+        # Measure first (dry run), then draw.
+        self.dry = True
+        first_top = self.top + self.header_first()
+        first_top += self.parties(first_top)
+        cont_top = self.top + self.header_continued(1, 2)
+        self.footer_h = self.footer(0.0)
+        self.dry = False
+
+        rows = [self.make_row(i, item) for i, item in enumerate(inv.items, start=1)]
+        for row in rows:
+            row["height"] = self.row_height(row)
+        first_cap = self.bottom - first_top - self.head_h - CONTINUED_H
+        next_cap = self.bottom - cont_top - self.head_h - CONTINUED_H
+        pages = self._paginate(rows, first_cap, next_cap, CONTINUED_H, self.footer_h)
+
+        for number, page_rows in enumerate(pages, start=1):
+            self._draw_page(page_rows, number, len(pages))
+            self.c.showPage()
+        self.c.save()
+        os.replace(tmp, target)  # atomic: never leave a half-written PDF behind
+        return target
+
+    def _draw_page(self, rows: list[dict], number: int, count: int) -> None:
+        y = self.top
+        if number == 1:
+            y += self.header_first()
+            y += self.parties(y)
+        else:
+            y += self.header_continued(number, count)
+        self.draw_table_head(y)
+        y += self.head_h
+        body_top = y
+        for row in rows:
+            self.draw_row(y, row)
+            y += row["height"]
+            self.line(self.left, y, self.right, y, 0.25, LIGHT)
+        if number == count:
+            fy = max(y, self.bottom - self.footer_h) if self.anchor_footer else y
+            self.draw_columns(body_top, fy)
+            self.footer(fy)
+        else:
+            end = self.bottom - CONTINUED_H
+            self.draw_columns(body_top, end)
+            self.line(self.left, end, self.right, end, 0.5, DARK)
+            self.text(self.right - 2.5, end + 1.8, f"Continued on next page  ·  Page {number} of {count}", 7.5, True, "r", SOFT)
+        self.draw_page_footer()
+        self.draw_frame(number, count)
+
+    # -- logos ------------------------------------------------------------------------------------------------
+
+    def draw_logo_row(self, y: float, max_h: float = 40.0, pad: float = 3.0) -> float:
+        """Logos across the header: first at the left, last at the right (middle one centred). Returns the height used."""
+        images = []
+        for position, path in enumerate(self.logos[:3]):
+            try:
+                reader = ImageReader(str(path))
+                width, height = reader.getSize()
+                wanted = self.logo_heights[position] if position < len(self.logo_heights) else 20.0
+                images.append((reader, width, height, min(float(wanted), max_h)))
+            except Exception:
+                logger.warning("Unreadable logo at %s", path, exc_info=True)
+        if not images:
+            return 0.0
+        x0, x1 = self.left + pad, self.right - pad
+        max_w = (x1 - x0) / len(images) - 4.0
+        tallest = 0.0
+        for position, (reader, width, height, wanted_h) in enumerate(images):
+            scale = min(max_w / width, wanted_h / height)
+            w, h = width * scale, height * scale
+            tallest = max(tallest, h)
+            if position == 0:
+                x = x0
+            elif position == len(images) - 1:
+                x = x1 - w
+            else:
+                x = (x0 + x1) / 2 - w / 2
+            if not self.dry:
+                self.c.drawImage(reader, x * mm, self._y(y + h), w * mm, h * mm, mask="auto")
+        return tallest
+
+    def _icon(self, kind: str, cx: float, cy: float, size: float = 3.6) -> None:
+        """Contact icon (grey variant, so it prints well in black-and-white) centred at (cx, cy) mm."""
+        path = ICON_DIR / f"{kind}-gray.png"
+        if path.exists() and not self.dry:
+            self.c.drawImage(ImageReader(str(path)), (cx - size / 2) * mm, self._y(cy + size / 2), size * mm, size * mm, mask="auto")
+
+
+class CorporateTemplate(InvoiceTemplate):
+    """Default OHM Powerin invoice: classic GST sections in a clean, grey-scale-safe corporate layout."""
+
+    name = "corporate"
+    LABEL_W = 29.0  # width of the label column in the invoice-details block
+
+    # -- small helpers ----------------------------------------------------------------------------
 
     @staticmethod
     def _state_line(party: dict) -> str | None:
@@ -247,115 +431,25 @@ class InvoicePDF:
         code = f", Code : {party['state_code']}" if party.get("state_code") else ""
         return f"State Name : {state}{code}"
 
-    def _seller_lines(self) -> list[Line]:
-        b = self.invoice.business
-        lines: list[Line] = [(b.get("business_name") or "", True, 8.5)]
-        if b.get("address"):
-            lines.append((b["address"], True, 7.5))
-        if b.get("phone"):
-            phone = str(b["phone"])
-            lines.append((phone if phone.startswith("+") else f"+91-{phone}", True, 7.5))
-        if b.get("gstin"):
-            lines.append((f"GSTIN/UIN: {b['gstin']}", True, 7.5))
-        if state := self._state_line(b):
-            lines.append((state, True, 7.5))
-        if b.get("email"):
-            lines.append((f"E-Mail : {b['email']}", True, 7.5))
-        return lines
-
-    def _party_lines(self, label: str, address: str, with_tax_ids: bool) -> list[Line]:
-        c = self.invoice.customer
-        lines: list[Line] = [(label, True, 7.5), (c.get("display_name") or "", True, 8)]
-        if c.get("company_name") and c.get("name") and c["name"] != c["company_name"]:
-            lines.append((f"Attn: {c['name']}", False, 7.5))
-        if address:
-            lines.append((address, False, 7.5))
-        if c.get("phone"):
-            lines.append((f"Phone: {c['phone']}", False, 7.5))
-        if with_tax_ids:
-            lines.append((f"GSTIN/UIN: {c.get('gstin') or 'Unregistered'}", True, 7.5))
-            if state := self._state_line(c):
-                lines.append((state, True, 7.5))
-        return lines
-
-    def _item_row(self, index: int, item) -> dict:
-        desc: list[Line] = [(item.name, True, 8)]
-        if item.description:
-            desc.append((item.description, False, 7))
-        cells = [
-            "", item.part_no or "", "", item.hsn_sac or "-", f"{format_rate(item.gst_rate)}%", format_quantity(item.quantity),
-            self.money(item.rate), item.unit or "",
-            self.money(item.discount) if item.discount > 0 else "-", self.money(item.taxable_amount),
-        ]
-        desc_w = self.columns[2][2] - self.columns[2][1]
-        part_w = self.columns[1][2] - self.columns[1][1] - 2.4
-        part_lines = _wrap(cells[1], self.regular, 8, part_w) if cells[1] else [""]
-        height = max(
-            self.block_height(desc, desc_w) + _ROW_PAD,
-            _LINE_H * len(part_lines) + 2 * _ROW_PAD,
-            _LINE_H + 2 * _ROW_PAD,
-        )
-        return {"index": index, "desc": desc, "cells": cells, "height": height, "part_lines": part_lines}
+    @staticmethod
+    def _inr(words: str) -> str:
+        return "INR " + words.removeprefix("Rupees ").strip() if words else ""
 
     def _tax_groups(self) -> list[dict]:
         groups: dict[Decimal, dict] = {}
         for item in self.invoice.items:
             g = groups.setdefault(item.gst_rate, {
-                "rate": item.gst_rate,
-                "taxable": Decimal(0), "cgst": Decimal(0), "sgst": Decimal(0), "igst": Decimal(0),
+                "rate": item.gst_rate, "taxable": Decimal(0), "cgst": Decimal(0), "sgst": Decimal(0), "igst": Decimal(0),
             })
             g["taxable"] += item.taxable_amount
             g["cgst"] += item.cgst
             g["sgst"] += item.sgst
             g["igst"] += item.igst
-        return list(groups.values())
-
-    @staticmethod
-    def _inr(words: str) -> str:
-        return "INR " + words.removeprefix("Rupees ").strip() if words else ""
-
-    def _footer_plan(self) -> dict:
-        """Content and heights (mm) of every section below the goods table on the last page."""
-        inv = self.invoice
-        b = inv.business
-        half = BOX_W / 2
-        groups = self._tax_groups()
-        tax_words = self._inr(amount_in_words(inv.total_tax)) if inv.total_tax > 0 else "INR Zero Only"
-
-        bank_lines: list[Line] = [("Bank Details", True, 8)]
-        for label, value in (
-            ("A/c Holder", b.get("account_name") or b.get("business_name")), ("Bank", b.get("bank_name")),
-            ("A/c No.", b.get("account_number")), ("IFSC", b.get("ifsc")), ("UPI", b.get("upi_id")),
-        ):
-            if value:
-                bank_lines.append((f"{label}: {value}", False, 7.5))
-        if not any(b.get(k) for k in ("bank_name", "account_number", "ifsc", "upi_id")):
-            bank_lines = [("Bank Details", True, 8), ("Bank details not provided.", False, 7.5)]
-
-        left_lines: list[Line] = [
-            (f"Tax Amount (in words) :  {tax_words}", True, 7.5),
-            (f"Company's PAN : {b.get('pan') or '-'}", True, 7.5),
-            ("Declaration:", True, 7.5),
-            (DECLARATION, False, 7.5),
-        ]
-        right_lines: list[Line] = []
-        if inv.notes:
-            right_lines += [("Notes", True, 7.5), (inv.notes, False, 7)]
-        if inv.terms:
-            right_lines += [("Terms & Conditions", True, 7.5), (inv.terms, False, 7)]
-
-        plan = {
-            "words": 11.0, "tax_head": 10.0, "tax_rows": 5.0 * (len(groups) + 1),
-            "info": max(24.0, self.block_height(left_lines, half), self.block_height(right_lines, half)),
-            "bank": max(24.0, self.block_height(bank_lines, half) + 2), "note": 5.5,
-            "bank_lines": bank_lines, "left_lines": left_lines, "right_lines": right_lines, "groups": groups,
-        }
-        plan["total"] = sum(plan[k] for k in ("words", "tax_head", "tax_rows", "info", "bank", "note"))
-        return plan
+        return sorted(groups.values(), key=lambda g: g["rate"])
 
     def _tax_lines(self) -> list[tuple[str, str]]:
         inv = self.invoice
-        groups = sorted(self._tax_groups(), key=lambda g: g["rate"])
+        groups = self._tax_groups()
         if len(groups) <= 1:  # one rate: show the invoice totals
             rate = groups[0]["rate"] if groups else Decimal(0)
             parts = [(rate, inv.igst)] if inv.is_interstate else [(rate / 2, inv.cgst), (rate / 2, inv.sgst)]
@@ -371,320 +465,338 @@ class InvoicePDF:
             lines.append(("Round Off", f"{sign} {self.money(abs(inv.round_off))}"))
         return lines
 
-    @staticmethod
-    def _paginate(rows: list[dict], full_h: float, last_h: float) -> list[list[dict]]:
-        """Split rows into pages; the last page must also leave room for the totals/footer."""
-        pages: list[list[dict]] = []
-        remaining = list(rows)
-        while True:
-            if sum(r["height"] for r in remaining) <= last_h:
-                pages.append(remaining)
-                return pages
-            chunk: list[dict] = []
-            used = 0.0
-            while remaining and (not chunk or used + remaining[0]["height"] <= full_h):
-                used += remaining[0]["height"]
-                chunk.append(remaining.pop(0))
-            if not remaining:
-                # everything fits on a plain page but not with the footer: carry the last row over
-                remaining = [chunk.pop()] if len(chunk) > 1 else []
-            pages.append(chunk)
-            if not remaining:
-                pages.append([])  # footer alone on its own page
-                return pages
+    # -- item-table geometry --------------------------------------------------------------------------
 
-    # -- build ----------------------------------------------------------------------------
+    _SPEC = (
+        ("S No", 10, "c"), ("Part No", 24, "l"), ("Description of Goods", None, "l"), ("HSN/SAC", 18, "c"),
+        ("GST %", 12, "c"), ("Quantity", 16, "r"), ("Rate", 21, "r"), ("Per", 11, "c"), ("Disc.", 14, "r"), ("Amount", 24, "r"),
+    )
 
-    def build(self, target: Path) -> Path:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_suffix(".tmp")
-        inv = self.invoice
-        self.c = pdf_canvas.Canvas(str(tmp), pagesize=A4)
-        self.c.setTitle(f"Tax Invoice {inv.invoice_number}")
-        self.c.setAuthor(inv.business.get("business_name", ""))
-        self.c.setSubject(f"Invoice for {inv.customer.get('display_name', '')}")
-        self.c.setCreator("Billing Software")
+    def columns(self) -> list[tuple[str, float, float, str]]:
+        if not hasattr(self, "_cols"):
+            fixed = sum(w for _, w, _ in self._SPEC if w)
+            cols, x = [], self.left
+            for header, w, align in self._SPEC:
+                w = w or self.width_mm - fixed
+                cols.append((header, x, x + w, align))
+                x += w
+            self._cols = cols
+        return self._cols
 
-        left_w = 116.0
-        right_w = BOX_W - left_w
-        cust = inv.customer
-        billing = cust.get("billing_address", "")
-        layout = {
-            "header_h": max([22.0, *(h + 2.0 for h in self.logo_heights[:3])]), "left_w": left_w,
-            "seller": self._seller_lines(),
-            "consignee": self._party_lines("Consignee", billing, True),
-            "shipped": self._party_lines("Shipped To", cust.get("shipping_address", "") or billing, False),
-            "footer": self._footer_plan(), "tax_lines": self._tax_lines(),
-        }
-        layout["info_h"] = max(27.0 + 3 * _REF_H, self.block_height(layout["seller"], left_w))
-        layout["party_h"] = max(26.0, self.block_height(layout["consignee"], left_w),
-                                self.block_height(layout["shipped"], right_w))
-        layout["tax_h"] = 4.6 * len(layout["tax_lines"]) + 2.0
-        table_top = MARGIN + layout["header_h"] + 6.5 + layout["info_h"] + layout["party_h"]
+    def _col(self, header: str) -> tuple[float, float]:
+        for h, x0, x1, _ in self.columns():
+            if h == header:
+                return x0, x1
+        raise KeyError(header)
 
-        full_h = BOX_BOTTOM_LIMIT - table_top - _HEAD_H - _CONTINUED_H
-        last_h = full_h + _CONTINUED_H - layout["footer"]["total"] - _TOTAL_ROW_H - layout["tax_h"]
-        rows = [self._item_row(index, item) for index, item in enumerate(inv.items, start=1)]
-        pages = self._paginate(rows, full_h, last_h)
+    # -- header -----------------------------------------------------------------------------------------------
 
-        for number, page_rows in enumerate(pages, start=1):
-            self._draw_page(page_rows, number == len(pages), number, len(pages), layout)
-            self.c.showPage()
-        self.c.save()
-        os.replace(tmp, target)  # atomic: never leave a half-written PDF behind
-        return target
+    @property
+    def split_x(self) -> float:
+        return self.left + 112.0  # divider between the seller / consignee column and the details column
 
-    # -- one page -----------------------------------------------------------------------------
+    def header_first(self) -> float:
+        inv, b = self.invoice, self.invoice.business
+        y = self.top
+        logo_h = self.draw_logo_row(y + 3.0)
+        if logo_h:
+            y += logo_h + 6.0
+            self.line(self.left, y, self.right, y, 0.5, MID)
+        pad = 3.0
+        col_w = self.split_x - self.left - 2 * pad
 
-    def _draw_page(self, rows: list[dict], last: bool, number: int, count: int, g: dict) -> None:
-        inv = self.invoice
-        x0, x1 = MARGIN, PAGE_W - MARGIN
-        y = MARGIN
+        # seller (left)
+        sy = y + 2.8
+        sy += self.para(self.left + pad, sy, b.get("business_name") or "", col_w, 12, True, TEXT) + 0.9
+        if b.get("address"):
+            sy += self.para(self.left + pad, sy, b["address"], col_w, 8, False, SOFT)
+        if b.get("phone"):
+            phone = str(b["phone"])
+            sy += self.para(self.left + pad, sy, phone if phone.startswith("+") else f"+91-{phone}", col_w, 8, False, SOFT)
+        if b.get("gstin"):
+            sy += self.para(self.left + pad, sy, f"GSTIN/UIN: {b['gstin']}", col_w, 8, True, TEXT)
+        if state := self._state_line(b):
+            sy += self.para(self.left + pad, sy, state, col_w, 8, False, SOFT)
+        if b.get("email"):
+            sy += self.para(self.left + pad, sy, f"E-Mail : {b['email']}", col_w, 8, False, SOFT)
+        left_h = sy + 2.5 - y
 
-        if not self._draw_logos(x0, x1, y, g["header_h"] - 2):
-            self.text(x0, y + 10, inv.business.get("business_name") or "", 16, True, color=BLUE)
-        if count > 1:
-            self.text(x1, y + 3, f"Page {number} of {count}", 7, False, "r", GREY)
-        y += g["header_h"]
-
-        box_top = y
-        self.text(PAGE_W / 2, y + 4.6, "Tax Invoice", 9, True, "c")
-        y += 6.5
-        self.line(x0, y, x1, y)
-
-        # Seller (left) and invoice details (right)
-        left_w, info_h = g["left_w"], g["info_h"]
-        right_x = x0 + left_w
-        mid = right_x + (x1 - right_x) / 2
-        self.block(x0, y, g["seller"], left_w)
-        top_h = info_h - 3 * _REF_H
-        cell_h = top_h / 2
-        meta = (
-            ("Invoice No.", inv.invoice_number, "Dated", format_date(inv.invoice_date)),
-            ("Place of Supply", inv.place_of_supply_label or inv.place_of_supply, None, None),
+        # tax invoice + invoice details (right)
+        rx = self.split_x + pad
+        ry = y + 2.8
+        details = (
+            ("Invoice No.", inv.invoice_number, True), ("Dated", format_date(inv.invoice_date), False),
+            ("Other Reference", inv.other_reference or "-", False), ("Phone", inv.contact_phone or "-", False),
+            ("ESN", inv.esn or "-", False),
         )
-        for i, (label1, value1, label2, value2) in enumerate(meta):
-            cy = y + i * cell_h
-            self.text(right_x + 1.6, cy + 3.3, label1, 7)
-            self.text(right_x + 1.6, cy + 7.6, value1, 8, True)
-            if label2:
-                self.text(mid + 1.6, cy + 3.3, label2, 7)
-                self.text(mid + 1.6, cy + 7.6, value2, 8, True)
-                self.line(mid, cy, mid, cy + cell_h)
-            if i:
-                self.line(right_x, cy, x1, cy)
-        self.line(right_x, y, right_x, y + info_h)
-        for i, (label, value) in enumerate((
-            ("Other Reference:", inv.other_reference), ("Phone :", inv.contact_phone), ("ESN:", inv.esn),
-        )):
-            ry = y + top_h + i * _REF_H
-            self.line(right_x, ry, x1, ry)
-            shown = value or "-"
-            room = x1 - right_x - 3.2
-            while len(shown) > 1 and stringWidth(f"{label} {shown}", self.bold, 8) / mm > room:
-                shown = shown[:-2] + "…"  # keep very long values inside the box
-            self.text(right_x + 1.6, ry + 4.2, f"{label} {shown}", 8, True)
-        y += info_h
-        self.line(x0, y, x1, y)
+        for n, (label, value, strong) in enumerate(details):
+            if n:
+                self.line(self.split_x, ry - 0.5, self.right, ry - 0.5, 0.25, LIGHT)
+            self.text(rx, ry + 0.4, label, 7.8, True, "l", SOFT)
+            self.para(rx + self.LABEL_W, ry + 0.2, str(value), self.right - rx - self.LABEL_W - pad, 9 if strong else 8.4, strong, TEXT)
+            ry += 5.4
+        right_h = ry + 1.0 - y
+        height = max(left_h, right_h)
+        self.line(self.split_x, y, self.split_x, y + height, 0.4, MID)
+        self.line(self.left, y + height, self.right, y + height, 0.5, DARK)
+        return (y - self.top) + height
 
-        # Consignee (left) and shipped-to (right)
-        self.block(x0, y, g["consignee"], left_w)
-        self.block(right_x, y, g["shipped"], x1 - right_x)
-        self.line(right_x, y, right_x, y + g["party_h"])
-        y += g["party_h"]
-        self.line(x0, y, x1, y)
+    def header_continued(self, number: int, count: int) -> float:
+        inv, b = self.invoice, self.invoice.business
+        y = self.top
+        self.text(self.left + 3.0, y + 3.0, b.get("business_name") or "", 11, True, "l", TEXT)
+        self.text(self.right - 3.0, y + 3.2, f"Invoice No. {inv.invoice_number}   ·   Dated {format_date(inv.invoice_date)}   ·   Page {number} of {count}", 8, False, "r", SOFT)
+        self.line(self.left, y + 14.0, self.right, y + 14.0, 0.5, DARK)
+        return 14.0
 
-        # Goods table
-        table_top = y
-        for header, cx0, cx1, align in self.columns:
+    # -- consignee / shipped to ---------------------------------------------------------------------------------
+
+    def parties(self, y: float) -> float:
+        cust = self.invoice.customer
+        billing = cust.get("billing_address", "")
+        shipping = cust.get("shipping_address", "") or billing
+        pad = 3.0
+        widths = (self.split_x - self.left, self.right - self.split_x)
+
+        def content(kind: str) -> list[tuple[str, bool, float, object]]:
+            lines: list[tuple[str, bool, float, object]] = [(cust.get("display_name") or "", True, 9, TEXT)]
+            if kind == "consignee":
+                if cust.get("company_name") and cust.get("name"):
+                    lines.append((f"Attn: {cust['name']}", False, 8, SOFT))
+                if billing:
+                    lines.append((billing, False, 8, SOFT))
+                if cust.get("phone"):
+                    lines.append((f"Phone: {cust['phone']}", False, 8, SOFT))
+                lines.append((f"GSTIN/UIN: {cust.get('gstin') or 'Unregistered'}", True, 8, TEXT))
+                if state := self._state_line(cust):
+                    lines.append((state, False, 8, SOFT))
+            else:
+                if cust.get("company_name") and cust.get("name"):
+                    lines.append((f"Attn: {cust['name']}", False, 8, SOFT))
+                if shipping:
+                    lines.append((shipping, False, 8, SOFT))
+            return lines
+
+        band_h = 5.4
+        blocks = []
+        for kind, label, w in (("consignee", "CONSIGNEE", widths[0]), ("shipped", "SHIPPED TO", widths[1])):
+            lines = content(kind)
+            h = sum(self.para_h(v, w - 2 * pad, size, bold) + 0.5 for v, bold, size, _ in lines)
+            blocks.append((label, lines, h))
+        body_h = max(h for _, _, h in blocks) + 5.0
+        height = band_h + max(body_h, 22.0)
+
+        x = self.left
+        for (label, lines, _), w in zip(blocks, widths):
+            self.rect(x, y, w, band_h, fill=FILL_BAND)
+            self.text(x + pad, y + 1.45, label, 7.5, True, "l", TEXT)
+            cy = y + band_h + 2.4
+            for value, bold, size, color in lines:
+                cy += self.para(x + pad, cy, value, w - 2 * pad, size, bold, color) + 0.5
+            x += w
+        self.line(self.left, y + band_h, self.right, y + band_h, 0.3, MID)
+        self.line(self.split_x, y, self.split_x, y + height, 0.4, MID)
+        self.line(self.left, y + height, self.right, y + height, 0.5, DARK)
+        return height
+
+    # -- item table ------------------------------------------------------------------------------------------------
+
+    def draw_table_head(self, y: float) -> None:
+        self.rect(self.left, y, self.width_mm, self.head_h, fill=FILL_HEAD)
+        self.line(self.left, y + self.head_h, self.right, y + self.head_h, 0.6, DARK)
+        ty = y + (self.head_h - 7.6 * 0.3528) / 2 - 0.15
+        for header, x0, x1, align in self.columns():
             if align == "l":
-                self.text(cx0 + 1.6, y + 4.1, header, 7.5, True)
+                self.text(x0 + 2.2, ty, header, 7.6, True, "l")
+            elif align == "r":
+                self.text(x1 - 2.2, ty, header, 7.6, True, "r")
             else:
-                self.text((cx0 + cx1) / 2 if align == "c" else cx1 - 1.4, y + 4.1, header, 7.5, True, align)
-        y += _HEAD_H
-        self.line(x0, y, x1, y)
-        body_top = y
-        for row in rows:
-            self._draw_row(y, row)
-            y += row["height"]
-            self.line(x0, y, x1, y, 0.4)  # horizontal rule under every item
+                self.text((x0 + x1) / 2, ty, header, 7.6, True, "c")
+        for _, x0, _, _ in self.columns()[1:]:
+            self.line(x0, y, x0, y + self.head_h, 0.3, MID)
 
-        if last:
-            plan = g["footer"]
-            body_bottom = BOX_BOTTOM_LIMIT - plan["total"] - _TOTAL_ROW_H
-            body_bottom = max(body_bottom, y + g["tax_h"])
-            amount_x = self.columns[-1][2] - 1.4
-            ty = body_bottom - g["tax_h"] + 3.6
-            for label, value in g["tax_lines"]:
-                self.text(self.columns[-1][1] - 1.5, ty, label, 7.5, True, "r")
-                self.text(amount_x, ty, value, 8, False, "r")
-                ty += 4.6
-            band_top = body_bottom - g["tax_h"]
-            self._column_lines(table_top, band_top)
-            self.line(x0, band_top, x1, band_top)  # rule above the tax lines
-            self.line(self.columns[-1][1], band_top, self.columns[-1][1], body_bottom, 0.4)
-            self.line(x0, body_bottom, x1, body_bottom)
-            self.text(self.columns[2][2] - 1.5, body_bottom + 4.1, "Total", 8, True, "r")
-            self.text(amount_x, body_bottom + 4.1, f"{self.currency} {self.money(inv.grand_total)}", 8.5, True, "r")
-            y = body_bottom + _TOTAL_ROW_H
-            self.line(x0, y, x1, y)
-            y = self._draw_footer(y, g)
-        else:
-            body_bottom = BOX_BOTTOM_LIMIT - _CONTINUED_H
-            self._column_lines(table_top, body_bottom)
-            self.line(x0, body_bottom, x1, body_bottom)
-            self.text(x1 - 2, body_bottom + 4.2, "Continued on next page...", 7.5, True, "r", GREY)
-            y = BOX_BOTTOM_LIMIT
+    def make_row(self, index: int, item) -> dict:
+        p0, p1 = self._col("Part No")
+        d0, d1 = self._col("Description of Goods")
+        return {
+            "index": index, "item": item,
+            "part": _wrap(item.part_no, self.regular, 8, p1 - p0 - 4.4) if item.part_no else [""],
+            "name": _wrap(item.name, self.bold, 8, d1 - d0 - 4.4),
+            "desc": _wrap(item.description, self.regular, 7, d1 - d0 - 4.4) if item.description else [],
+        }
 
-        self.c.setLineWidth(0.6)
-        self.c.setStrokeColor(INK)
-        self.c.rect(x0 * mm, self._y(y), BOX_W * mm, (y - box_top) * mm)
-        self._draw_strip()
+    def row_height(self, row: dict) -> float:
+        text_h = max(len(row["part"]) * LEAD, len(row["name"]) * LEAD + len(row["desc"]) * 3.3, LEAD)
+        return max(text_h + 4.4, 8.0)
 
-    def _column_lines(self, y_from: float, y_to: float) -> None:
-        for _, cx0, _, _ in self.columns[1:]:
-            self.line(cx0, y_from, cx0, y_to, 0.4)
-
-    def _draw_row(self, y: float, row: dict) -> None:
-        base = y + _ROW_PAD + 2.9
-        self.text((self.columns[0][1] + self.columns[0][2]) / 2, base, str(row["index"]), 8, False, "c")
-        self.block(self.columns[2][1], y + _ROW_PAD - 0.6, row["desc"], self.columns[2][2] - self.columns[2][1])
-        for n, part_line in enumerate(row["part_lines"]):
-            self.text(self.columns[1][1] + 1.6, base + n * _LINE_H, part_line, 8)
-        for (_, cx0, cx1, align), value in list(zip(self.columns, row["cells"]))[3:]:
-            if align == "c":
-                self.text((cx0 + cx1) / 2, base, value, 8, False, "c")
+    def draw_row(self, y: float, row: dict) -> None:
+        item, ty = row["item"], y + 2.4
+        cells = {
+            "S No": str(row["index"]), "HSN/SAC": item.hsn_sac or "-", "GST %": f"{format_rate(item.gst_rate)}%",
+            "Quantity": format_quantity(item.quantity), "Rate": self.money(item.rate), "Per": item.unit or "",
+            "Disc.": self.money(item.discount) if item.discount > 0 else "-", "Amount": self.money(item.taxable_amount),
+        }
+        for header, x0, x1, align in self.columns():
+            if header == "Part No":
+                for n, piece in enumerate(row["part"]):
+                    self.text(x0 + 2.2, ty + n * LEAD, piece, 8)
+            elif header == "Description of Goods":
+                cy = ty
+                for piece in row["name"]:
+                    self.text(x0 + 2.2, cy, piece, 8, True)
+                    cy += LEAD
+                for piece in row["desc"]:
+                    self.text(x0 + 2.2, cy, piece, 7, False, "l", SOFT)
+                    cy += 3.3
+            elif align == "r":
+                self.text(x1 - 2.2, ty, cells[header], 8, header == "Amount", "r")
             else:
-                self.text(cx1 - 1.4, base, value, 8, False, "r")
+                self.text((x0 + x1) / 2, ty, cells[header], 8, False, "c")
 
-    # -- totals, tax table, declaration, bank, signature ------------------------------------------
+    def draw_columns(self, y0: float, y1: float) -> None:
+        for _, x0, _, _ in self.columns()[1:]:
+            self.line(x0, y0, x0, y1, 0.25, LIGHT)
 
-    def _draw_footer(self, y: float, g: dict) -> float:
-        inv = self.invoice
-        b = inv.business
-        plan = g["footer"]
-        x0, x1 = MARGIN, PAGE_W - MARGIN
-        half = x0 + BOX_W / 2
-        quarter = half + BOX_W / 4
+    # -- footer: tax lines, total, words, tax summary, declaration, bank, signature -----------------------------------
 
-        # Amount chargeable
-        self.text(x0 + 1.6, y + 3.6, "Amount Chargeable (in words)", 7.5)
-        self.text(x1 - 1.6, y + 3.6, "E. & O.E", 7.5, True, "r")
-        self.text(x0 + 1.6, y + 8.4, self._inr(inv.amount_in_words), 8.5, True)
-        y += plan["words"]
-        self.line(x0, y, x1, y)
+    def footer(self, y: float) -> float:
+        inv, b = self.invoice, self.invoice.business
+        start, L, R = y, self.left, self.right
+        W = self.width_mm
+        am0, am1 = self._col("Amount")
 
-        y = self._draw_tax_table(y, plan)
+        # --- OUTPUT CGST / SGST / Round Off, then the total ---
+        self.line(L, y, R, y, 0.5, DARK)
+        lines = self._tax_lines()
+        ty = y + 2.0
+        for label, value in lines:
+            self.text(am0 - 3.0, ty, label, 8, True, "r", SOFT if label == "Round Off" else TEXT)
+            self.text(am1 - 2.2, ty, value, 8.4, False, "r")
+            ty += 5.0
+        ty += 1.2
+        self.line(am0, y, am0, ty, 0.25, LIGHT)
+        self.line(L, ty, R, ty, 1.0, DARK)               # heavier rule above the total
+        self.rect(L, ty, W, 9.0, fill=FILL_BAND)
+        self.text(am0 - 3.0, ty + 2.5, "Total", 10.5, True, "r")
+        self.text(R - 2.5, ty + 2.2, f"{self.currency} {self.money(inv.grand_total)}", 12.5, True, "r")
+        self.line(L, ty + 9.0, R, ty + 9.0, 0.5, DARK)
+        y = ty + 9.0
 
-        # Declaration (left) / notes and terms (right)
-        self.block(x0, y, plan["left_lines"], BOX_W / 2)
-        if plan["right_lines"]:
-            self.block(half, y, plan["right_lines"], BOX_W / 2)
-        self.line(half, y, half, y + plan["info"])
-        y += plan["info"]
-        self.line(x0, y, x1, y)
+        # --- amount chargeable (in words) ---
+        self.text(L + 3.0, y + 2.0, "Amount Chargeable (in words)", 7.8, True, "l", SOFT)
+        self.text(R - 3.0, y + 2.0, "E. & O.E", 7.8, True, "r", SOFT)
+        wy = y + 6.6
+        wy += self.para(L + 3.0, wy, self._inr(inv.amount_in_words), W - 6.0, 9, True)
+        y = wy + 2.2
+        self.line(L, y, R, y, 0.5, DARK)
 
-        # Bank details (left) / signatory (right)
-        self.block(x0, y + 1.5, plan["bank_lines"], BOX_W / 2, align="c")
-        self.text(quarter, y + 5, f"for {b.get('business_name') or ''}", 8, True, "c")
-        self.text(quarter, y + plan["bank"] - 3, "Authorised Signatory", 8, True, "c")
-        self.line(half, y, half, y + plan["bank"])
-        y += plan["bank"]
-        self.line(x0, y, x1, y)
-
-        self.text(PAGE_W / 2, y + 3.9, "This is a Computer Generated Invoice", 7, True, "c")
-        return y + plan["note"]
-
-    def _draw_tax_table(self, y: float, plan: dict) -> float:
-        """Tax summary: Taxable Value | Tax (Rate, Amount) | Total Tax Amount, one row per GST rate."""
-        x0, x1 = MARGIN, PAGE_W - MARGIN
-        widths = [94, 34, 20, 26, 20]
-        xs = [x0]
+        # --- tax summary ---
+        groups = self._tax_groups()
+        widths = [90.0, 34.0, 20.0, 26.0, 20.0]
+        xs = [L]
         for w in widths:
             xs.append(xs[-1] + w)
-        head_h = plan["tax_head"]
-        top = y
-        mid_y = top + head_h / 2
-
-        def head(x_from: float, x_to: float, label: str, ty: float) -> None:
-            self.text((x_from + x_to) / 2, ty, label, 7.5, True, "c")
-
-        head(xs[1], xs[2], "Taxable", top + 4.1)
-        head(xs[1], xs[2], "Value", top + 8.6)
-        head(xs[2], xs[4], "Tax", top + 3.6)
-        head(xs[2], xs[3], "Rate", mid_y + 3.6)
-        head(xs[3], xs[4], "Amount", mid_y + 3.6)
-        head(xs[4], xs[5], "Total", top + 4.1)
-        head(xs[4], xs[5], "Tax Amount", top + 8.6)
-        self.line(xs[2], mid_y, xs[4], mid_y, 0.4)
-        self.line(x0, top, x1, top, 0.4)
-        y += head_h
-        self.line(x0, y, x1, y, 0.4)
-
+        head_h = 10.0
+        self.rect(L, y, W, head_h, fill=FILL_HEAD)
+        centre = lambda a, z, label, ty_: self.text((a + z) / 2, ty_, label, 7.6, True, "c")  # noqa: E731
+        centre(xs[1], xs[2], "Taxable", y + 1.6)
+        centre(xs[1], xs[2], "Value", y + 5.6)
+        centre(xs[2], xs[4], "Tax", y + 1.2)
+        centre(xs[2], xs[3], "Rate", y + 6.2)
+        centre(xs[3], xs[4], "Amount", y + 6.2)
+        centre(xs[4], xs[5], "Total", y + 1.6)
+        centre(xs[4], xs[5], "Tax Amount", y + 5.6)
+        self.line(xs[2], y + head_h / 2, xs[4], y + head_h / 2, 0.3, MID)
+        gy = y + head_h
+        self.line(L, gy, R, gy, 0.6, DARK)
         taxable_total = tax_total = Decimal(0)
-        for gr in plan["groups"]:
-            ty = y + 3.7
-            tax = gr["igst"] if self.invoice.is_interstate else gr["cgst"] + gr["sgst"]
-            self.text(xs[2] - 1.4, ty, self.money(gr["taxable"]), 8, False, "r")
-            self.text(xs[3] - 1.4, ty, f"{format_rate(gr['rate'])}%", 8, False, "r")
-            self.text(xs[4] - 1.4, ty, self.money(tax), 8, False, "r")
-            self.text(xs[5] - 1.4, ty, self.money(tax), 8, False, "r")
-            taxable_total += gr["taxable"]
+        for g in groups:
+            tax = g["igst"] if inv.is_interstate else g["cgst"] + g["sgst"]
+            self.text(xs[2] - 2.2, gy + 1.5, self.money(g["taxable"]), 8, False, "r")
+            self.text(xs[3] - 2.2, gy + 1.5, f"{format_rate(g['rate'])}%", 8, False, "r")
+            self.text(xs[4] - 2.2, gy + 1.5, self.money(tax), 8, False, "r")
+            self.text(xs[5] - 2.2, gy + 1.5, self.money(tax), 8, False, "r")
+            taxable_total += g["taxable"]
             tax_total += tax
-            y += 5.0
-
-        self.line(x0, y, x1, y, 0.4)
-        ty = y + 3.7
-        self.text(xs[1] - 1.4, ty, "Total", 8, True, "r")
-        self.text(xs[2] - 1.4, ty, self.money(taxable_total), 8, True, "r")
-        self.text(xs[4] - 1.4, ty, self.money(tax_total), 8, True, "r")
-        self.text(xs[5] - 1.4, ty, self.money(tax_total), 8, True, "r")
-        y += 5.0
-
-        # vertical dividers; Rate/Amount only start below the "Tax" heading
+            gy += 5.4
+            self.line(L, gy, R, gy, 0.25, LIGHT)
+        self.line(L, gy, R, gy, 0.5, MID)
+        self.text(xs[1] - 2.2, gy + 1.5, "Total", 8, True, "r")
+        self.text(xs[2] - 2.2, gy + 1.5, self.money(taxable_total), 8, True, "r")
+        self.text(xs[4] - 2.2, gy + 1.5, self.money(tax_total), 8, True, "r")
+        self.text(xs[5] - 2.2, gy + 1.5, self.money(tax_total), 8, True, "r")
+        gy += 5.4
         for xv in xs[1:-1]:
-            self.line(xv, mid_y if xv == xs[3] else top, xv, y, 0.4)
-        self.line(x0, y, x1, y)
-        return y
+            self.line(xv, y + head_h / 2 if xv == xs[3] else y, xv, gy, 0.25, LIGHT)
+        self.line(L, gy, R, gy, 0.5, DARK)
+        y = gy
 
-    # -- logo and contact strip -------------------------------------------------------------------
+        # --- tax amount in words / PAN / declaration  |  notes & terms ---
+        half = W / 2
+        pad = 3.0
+        tax_words = self._inr(amount_in_words(inv.total_tax)) if inv.total_tax > 0 else "INR Zero Only"
+        ly = y + 2.6
+        ly += self.para(L + pad, ly, f"Tax Amount (in words) :  {tax_words}", half - 2 * pad, 8, True) + 1.4
+        ly += self.para(L + pad, ly, f"Company's PAN : {b.get('pan') or '-'}", half - 2 * pad, 8, True) + 1.4
+        ly += self.para(L + pad, ly, "Declaration:", half - 2 * pad, 8, True) + 0.4
+        ly += self.para(L + pad, ly, DECLARATION, half - 2 * pad, 7.8, False, SOFT)
+        ry = y + 2.6
+        if inv.notes:
+            ry += self.para(L + half + pad, ry, "Notes", half - 2 * pad, 8, True) + 0.4
+            ry += self.para(L + half + pad, ry, inv.notes, half - 2 * pad, 7.6, False, SOFT) + 1.6
+        if inv.terms:
+            ry += self.para(L + half + pad, ry, "Terms & Conditions", half - 2 * pad, 8, True) + 0.4
+            ry += self.para(L + half + pad, ry, inv.terms, half - 2 * pad, 7.6, False, SOFT)
+        info_h = max(ly, ry, y + 22.0) + 2.4 - y
+        self.line(L + half, y, L + half, y + info_h, 0.4, MID)
+        y += info_h
+        self.line(L, y, R, y, 0.5, MID)
 
-    def _draw_logos(self, x0: float, x1: float, y: float, max_h: float) -> bool:
-        """Draw up to three logos across the header: first at the left, last at the right."""
-        images = []
-        for position, path in enumerate(self.logos[:3]):
-            try:
-                reader = ImageReader(str(path))
-                images.append((reader, *reader.getSize(), self.logo_heights[position] if position < len(self.logo_heights) else 20.0))
-            except Exception:
-                logger.warning("Unreadable logo at %s", path, exc_info=True)
-        if not images:
-            return False
-        max_w = (x1 - x0) / len(images) - 4.0  # logos share the header width
-        for position, (reader, width, height, wanted_h) in enumerate(images):
-            scale = min(max_w / width, min(wanted_h, max_h) / height)
-            w, h = width * scale, height * scale
-            if position == 0:
-                x = x0
-            elif position == len(images) - 1:
-                x = x1 - w
-            else:
-                x = (x0 + x1) / 2 - w / 2
-            self.c.drawImage(reader, x * mm, self._y(y + 1 + h), w * mm, h * mm, mask="auto")
-        return True
+        # --- bank details  |  for <business> / authorised signatory ---
+        bank = [(label, value) for label, value in (
+            ("A/c Holder", b.get("account_name") or b.get("business_name")), ("Bank", b.get("bank_name")),
+            ("A/c No.", b.get("account_number")), ("IFSC", b.get("ifsc")), ("UPI", b.get("upi_id")),
+        ) if value]
+        if not any(b.get(k) for k in ("bank_name", "account_number", "ifsc", "upi_id")):
+            bank = []
+        by = y + 2.6
+        by += self.para(L + pad, by, "Bank Details", half - 2 * pad, 8.6, True) + 1.0
+        if bank:
+            for label, value in bank:
+                self.text(L + pad, by, f"{label}", 7.8, False, "l", SOFT)
+                by += self.para(L + pad + 22.0, by, str(value), half - 2 * pad - 22.0, 8, True) + 0.7
+        else:
+            by += self.para(L + pad, by, "Bank details not provided.", half - 2 * pad, 8, False, SOFT)
+        bank_h = max(by, y + 30.0) + 2.0 - y
+        cx = L + half + half / 2
+        self.text(cx, y + 3.0, f"for {b.get('business_name') or ''}", 9, True, "c")
+        sign_y = y + bank_h - 9.0
+        self.line(L + half + 18.0, sign_y, R - 18.0, sign_y, 0.5, DARK)
+        self.text(cx, sign_y + 1.6, "Authorised Signatory", 8.4, True, "c")
+        self.line(L + half, y, L + half, y + bank_h, 0.4, MID)
+        y += bank_h
+        self.line(L, y, R, y, 0.5, DARK)
 
-    def _icon(self, kind: str, cx: float, cy: float) -> None:
-        """Draw the call / WhatsApp / mail logo (4 mm square) centred at (cx, cy) mm."""
-        path = ICON_DIR / f"{kind}.png"
-        if path.exists():
-            self.c.drawImage(ImageReader(str(path)), (cx - 2) * mm, self._y(cy + 2), 4 * mm, 4 * mm, mask="auto")
+        # --- computer generated ---
+        self.text((L + R) / 2, y + 1.8, "This is a Computer Generated Invoice", 7.6, True, "c", SOFT)
+        y += 6.0
+        return y - start
 
+    # -- per-page frame and contact footer -----------------------------------------------------------------------------------
 
-    def _draw_strip(self) -> None:
-        """Blue contact strip at the foot of every page, with call / WhatsApp / mail icons, inside a page outline."""
+    def draw_frame(self, number: int, count: int) -> None:
+        self.rect(self.left, self.top, self.width_mm, self.frame_bottom - self.top, stroke=DARK, width=0.7)
+
+    frame_bottom = 287.0
+
+    def draw_page_footer(self) -> None:
         b = self.invoice.business
         phone, whatsapp, email = (b.get(k) or "" for k in ("footer_phone", "footer_whatsapp", "footer_email"))
-        items: list[tuple[list[str], str]] = []  # (icons, text)
+        address = " ".join((b.get("footer_address") or "").split())
+        if not (phone or whatsapp or email or address):
+            return
+        self.line(self.left, self.bottom, self.right, self.bottom, 0.5, DARK)
+        items: list[tuple[list[str], str]] = []
         if phone and whatsapp and phone.strip() == whatsapp.strip():
             items.append((["call", "whatsapp"], phone))
         else:
@@ -694,30 +806,31 @@ class InvoicePDF:
                 items.append((["whatsapp"], whatsapp))
         if email:
             items.append((["mail"], email))
+        y = self.bottom + 2.4
         if items:
-            icon_w, gap_icon, gap_item, size = 4.0, 1.6, 8.0, 10
-            widths = [
-                len(icons) * icon_w + (len(icons) - 1) * 0.8 + gap_icon + stringWidth(value, self.bold, size) / mm
-                for icons, value in items
-            ]
-            x = PAGE_W / 2 - (sum(widths) + gap_item * (len(items) - 1)) / 2
-            base = 281.0
+            size, icon_w, gap_item = 9.5, 3.6, 7.0
+            widths = [len(icons) * (icon_w + 0.6) + 0.8 + self.tw(value, size, True) for icons, value in items]
+            x = (self.left + self.right) / 2 - (sum(widths) + gap_item * (len(items) - 1)) / 2
             for (icons, value), width in zip(items, widths):
                 for n, icon in enumerate(icons):
-                    self._icon(icon, x + icon_w / 2 + n * (icon_w + 0.8), base - 1.3)
-                self.text(x + width - stringWidth(value, self.bold, size) / mm, base, value, size, True, "l", BLUE)
+                    self._icon(icon, x + icon_w / 2 + n * (icon_w + 0.6), y + 1.9, icon_w)
+                self.text(x + width - self.tw(value, size, True), y, value, size, True, "l", TEXT)
                 x += width + gap_item
-        if b.get("footer_address"):
-            self.text(PAGE_W / 2, 286.0, " ".join(b["footer_address"].split()), 7.5, True, "c", BLUE)
-        self.c.setFillColor(colors.HexColor("#8cc4ee"))
-        self.c.rect(0, 6.0 * mm, PAGE_W * mm, 1.2 * mm, stroke=0, fill=1)
-        self.c.setFillColor(BLUE)
-        self.c.rect(0, 0, PAGE_W * mm, 6.0 * mm, stroke=0, fill=1)
-        # outline around the whole invoice page
-        self.c.setStrokeColor(INK)
-        self.c.setLineWidth(0.6)
-        self.c.rect(4 * mm, self._y(PAGE_H - 8.7), (PAGE_W - 8) * mm, (PAGE_H - 8.7 - 4) * mm)
+            y += 5.6
+        if address:
+            self.para((self.left + 4.0), y, address, self.width_mm - 8.0, 7.6, True, SOFT, "c")
 
 
-def generate_invoice_pdf(invoice: InvoiceOut, target: Path, logo: Path | list[Path] | None = None, logo_heights: list[float] | None = None) -> Path:
-    return InvoicePDF(invoice, logo, logo_heights).build(target)
+TEMPLATES: dict[str, type[InvoiceTemplate]] = {CorporateTemplate.name: CorporateTemplate}
+DEFAULT_TEMPLATE = CorporateTemplate.name
+InvoicePDF = CorporateTemplate  # backwards-compatible name
+
+
+def generate_invoice_pdf(
+    invoice: InvoiceOut,
+    target: Path,
+    logo: Path | list[Path] | None = None,
+    logo_heights: list[float] | None = None,
+    template: str = DEFAULT_TEMPLATE,
+) -> Path:
+    return TEMPLATES[template](invoice, logo, logo_heights).build(target)
