@@ -133,6 +133,17 @@ Optional demo data (only runs on an empty database):
 python -m backend.seed
 ```
 
+### Try it online with GitHub Codespaces
+
+GitHub Pages cannot run this app (it needs the Python backend), but a Codespace can:
+
+1. On the repository page click **Code → Codespaces → Create codespace on main**.
+2. Wait for the setup to finish; the app starts automatically on port 8000.
+3. Open the **Ports** tab and click the globe icon next to port 8000 (or accept the "open in browser" prompt).
+
+The Codespace starts with an empty database. Add your business details in **Settings** and import your
+price list from **Products → Import Excel/CSV**. Codespaces are for testing, not production use.
+
 ### Configuration (environment variables)
 
 | Variable | Default | Meaning |
