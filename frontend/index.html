@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Billing — GST Invoicing</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f5bea'/%3E%3Cpath d='M10 8h9l4 4v12H10z' fill='white'/%3E%3Cpath d='M13 16h7M13 20h5' stroke='%232f5bea' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css?v=9">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="8" fill="#2f5bea"/><path d="M10 8h9l4 4v12H10z" fill="#fff"/><path d="M13 16h7M13 20h5" stroke="#2f5bea" stroke-width="2"/></svg>
+        </span>
+        <div>
+          <div class="brand-name">Billing</div>
+          <div class="brand-sub" id="brand-business">GST Invoicing</div>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Main">
+        <a href="#/dashboard" data-nav="dashboard"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z"/></svg>Dashboard</a>
+        <div class="nav-group">Sales</div>
+        <a href="#/invoices" data-nav="invoices"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9zM8 13h8v2H8zm0 4h5v2H8z"/></svg>Invoices</a>
+        <a href="#/customers" data-nav="customers"><svg viewBox="0 0 24 24"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5C15 14.2 10.3 13 8 13zm8 0c-.3 0-.6 0-1 .1 1.2.8 2 1.9 2 3.4V19h6v-2.5c0-2.3-4.7-3.5-7-3.5z"/></svg>Customers</a>
+        <a href="#/products" data-nav="products"><svg viewBox="0 0 24 24"><path d="M21 16.5V7.5L12 2 3 7.5v9l9 5.5zM12 4.3l6.4 3.9L12 12 5.6 8.2zM5 9.9l6 3.6v6.9l-6-3.6zm8 10.5v-6.9l6-3.6v6.9z"/></svg>Products &amp; Services</a>
+        <div class="nav-group">Money</div>
+        <a href="#/payments" data-nav="payments"><svg viewBox="0 0 24 24"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H4v-6h16zm0-10H4V6h16z"/></svg>Payments</a>
+        <a href="#/reports" data-nav="reports"><svg viewBox="0 0 24 24"><path d="M5 9h3v10H5zm5.5-5h3v15h-3zM16 13h3v6h-3z"/></svg>Reports <span class="nav-badge">Soon</span></a>
+        <div class="nav-spacer"></div>
+        <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.9a7 7 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7 7 0 0 0 1.7 1L11 21h4l.4-2.9a7 7 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>Settings</a>
+      </nav>
+    </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+        </button>
+        <div class="topbar-title">
+          <div class="crumb" id="crumb"></div>
+          <h1 id="page-title">Dashboard</h1>
+        </div>
+        <div class="topbar-actions">
+          <a href="#/invoices/new" class="btn btn-primary" id="topbar-new-invoice">
+            <svg viewBox="0 0 24 24"><path d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg><span>New Invoice</span>
+          </a>
+        </div>
+      </header>
+      <main id="view" class="view" tabindex="-1">
+        <div class="loading"><span class="spinner"></span>Loading…</div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toasts" aria-live="polite"></div>
+
+  <noscript>This application requires JavaScript.</noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

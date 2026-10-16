@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime data: database, uploaded logo and generated PDFs
+data/
+invoices/*.pdf
+invoices/*.tmp
+
+# Business price list (imported into the app, not code)
+details/
