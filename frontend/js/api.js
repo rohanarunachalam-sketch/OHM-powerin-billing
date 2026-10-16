@@ -21,7 +21,7 @@ async function request(method, path, body, { isForm = false } = {}) {
 
   let response;
   try {
-    response = await fetch(path, options);
+    response = await fetch(path.replace(/^\//, ""), options);  // relative: works at the site root and under /repo/frontend/
   } catch {
     throw new ApiError("Cannot reach the server. Check that the application is running.", 0);
   }
@@ -75,7 +75,7 @@ export const api = {
   setInvoiceStatus: (id, status) => request("PATCH", `/api/invoices/${id}/status`, { status }),
   recordPayment: (id, amount) => request("POST", `/api/invoices/${id}/payments`, { amount }),
   regeneratePdf: (id) => request("POST", `/api/invoices/${id}/pdf/regenerate`),
-  pdfUrl: (id, download = false) => `/api/invoices/${id}/pdf${download ? "?download=true" : ""}`,
+  pdfUrl: (id, download = false) => `api/invoices/${id}/pdf${download ? "?download=true" : ""}`,
 
   settings: () => request("GET", "/api/settings"),
   saveSettings: (data) => request("PUT", "/api/settings", data),
@@ -90,7 +90,7 @@ export const api = {
     return request("POST", "/api/products/import", form, { isForm: true });
   },
   deleteLogo: (slot = 1) => request("DELETE", `/api/settings/logo?slot=${slot}`),
-  logoUrl: (slot = 1) => `/api/settings/logo?slot=${slot}&v=${Date.now()}`,
+  logoUrl: (slot = 1) => `api/settings/logo?slot=${slot}&v=${Date.now()}`,
   logoHeights: (settings) => (settings.logos || []).map((has, i) => (has ? (settings.logo_heights || [])[i] || 20 : null)).filter((h) => h !== null),
   logoUrls: (settings) => (settings.logos || []).map((has, i) => (has ? api.logoUrl(i + 1) : null)).filter(Boolean),
 };

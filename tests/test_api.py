@@ -393,3 +393,11 @@ def test_export_all_data_as_xlsx(client):
     headers = [c.value for c in wb["Invoices"][1]]
     grand = headers.index("Grand total") + 1
     assert all(isinstance(wb["Invoices"].cell(row=r_, column=grand).value, (int, float)) for r_ in range(2, wb["Invoices"].max_row + 1))
+
+
+def test_static_bundle_is_up_to_date():
+    """frontend/engine/app.zip (what GitHub Pages runs in the browser) must match backend/. Fix: python tools/build_static.py"""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    import build_static
+    assert build_static.is_current(), "Run `python tools/build_static.py` and commit frontend/engine/app.zip"

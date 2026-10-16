@@ -677,8 +677,10 @@ class CorporateTemplate(InvoiceTemplate):
         self.line(am0, y, am0, ty, 0.25, LIGHT)
         self.line(L, ty, R, ty, 1.0, DARK)               # heavier rule above the total
         self.rect(L, ty, W, 9.0, fill=FILL_BAND)
-        self.text(am0 - 3.0, ty + 2.5, "Total", 10.5, True, "r")
-        self.text(R - 2.5, ty + 2.2, f"{self.currency} {self.money(inv.grand_total)}", 12.5, True, "r")
+        total_text = f"{self.currency} {self.money(inv.grand_total)}"
+        # The label sits just left of the amount however wide the amount is.
+        self.text(R - 2.5 - self.tw(total_text, 12.5, True) - 4.0, ty + 2.5, "Total", 10.5, True, "r")
+        self.text(R - 2.5, ty + 2.2, total_text, 12.5, True, "r")
         self.line(L, ty + 9.0, R, ty + 9.0, 0.5, DARK)
         y = ty + 9.0
 

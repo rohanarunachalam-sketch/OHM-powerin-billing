@@ -72,8 +72,14 @@ export async function render({ el, setTitle, isCurrent }) {
     if (!file) return;
     try {
       const result = await api.importProducts(file);
-      toast(`Imported: ${result.created} added, ${result.updated} updated${result.error_count ? `, ${result.error_count} skipped` : ""}`, result.error_count ? "error" : "success");
-      if (result.error_count) window.alert([`${result.error_count} row(s) were skipped:`, "", ...result.errors.slice(0, 15)].join("\n"));
+      toast("Import complete", "success", `${result.created} added, ${result.updated} updated${result.error_count ? `, ${result.error_count} skipped` : ""}.`);
+      if (result.error_count) {
+        openModal({
+          title: `${result.error_count} row${result.error_count === 1 ? " was" : "s were"} skipped`, size: "sm",
+          body: `<p class="modal-text">These rows could not be imported:</p><ul style="padding-left:18px;color:var(--text-2)">${result.errors.slice(0, 15).map((e) => `<li>${esc(e)}</li>`).join("")}</ul>`,
+          footer: '<button type="button" class="btn btn-primary" data-close>Close</button>',
+        });
+      }
       load();
     } catch (error) { toastError(error); }
   });

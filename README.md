@@ -133,6 +133,22 @@ Optional demo data (only runs on an empty database):
 python -m backend.seed
 ```
 
+### GitHub Pages edition (no server, no database setup)
+
+The same application also runs entirely in the browser on GitHub Pages: `frontend/engine/` loads
+[Pyodide](https://pyodide.org) (Python for the browser) in a web worker, runs the unchanged FastAPI backend there and
+answers the app's `api/*` requests through a service worker. The database is SQLite stored in the browser
+(IndexedDB), so **data stays on the device and browser profile you use**; it is erased if you clear site data, so use
+**Settings → Export data** for backups.
+
+* Turn it on once: repository **Settings → Pages → Build and deployment → Deploy from a branch → `main` / `(root)`**.
+  The site is then at `https://<user>.github.io/<repo>/` (the root page forwards to `frontend/`).
+* The first start downloads about 30 MB and takes roughly 30–60 seconds; the page shows its progress.
+* When the page is served by a real backend (`uvicorn`) none of this is used.
+* After changing anything under `backend/` run `python tools/build_static.py` and commit `frontend/engine/app.zip`
+  (a test fails if the bundle is out of date).
+* The PDF uses the bundled Arimo font (Apache 2.0, Arial-compatible metrics) because system fonts do not exist in the browser.
+
 ### Try it online with GitHub Codespaces
 
 GitHub Pages cannot run this app (it needs the Python backend), but a Codespace can:

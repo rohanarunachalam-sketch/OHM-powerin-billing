@@ -60,10 +60,22 @@
     </div>
   </div>
 
+  <div id="engine-splash" class="splash" hidden role="status">
+    <div class="splash-card">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 34 34"><rect width="34" height="34" fill="#1b3a6b"/><text x="17" y="22.5" font-family="Inter, Arial, sans-serif" font-weight="700" font-size="14" text-anchor="middle" fill="#fff">OP</text></svg></span>
+      <h1>OHM Powerin Billing</h1>
+      <p id="engine-status">Starting…</p>
+      <div class="splash-bar"><span></span></div>
+      <p class="splash-note">The first start takes about a minute while the billing engine is prepared in your browser; later visits are faster. Your data is stored on this device only.</p>
+      <p id="engine-error" class="field-error" hidden></p>
+      <button id="engine-retry" class="btn btn-primary" hidden onclick="location.reload()">Try again</button>
+    </div>
+  </div>
+
   <div id="modal-root"></div>
   <div id="toast-root" class="toasts" aria-live="polite"></div>
 
   <noscript>This application requires JavaScript.</noscript>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="engine/boot.js"></script>
 </body>
 </html>
