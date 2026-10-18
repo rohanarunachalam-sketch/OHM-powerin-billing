@@ -67,6 +67,7 @@ export async function render({ el, setTitle, isCurrent }) {
           <div class="card-header"><div><h2>Bank &amp; UPI</h2><p>Printed in the payment section of the invoice.</p></div></div>
           <div class="card-body form-grid">
             <div class="field"><label for="s-bank">Bank name</label><input id="s-bank" name="bank_name" maxlength="200"></div>
+            <div class="field"><label for="s-branch">Branch</label><input id="s-branch" name="bank_branch" maxlength="200" placeholder="e.g. Anna Salai, Chennai"></div>
             <div class="field"><label for="s-acname">Account holder name</label><input id="s-acname" name="account_name" maxlength="200" placeholder="Defaults to business name"></div>
             <div class="field"><label for="s-acno">Account number</label><input id="s-acno" name="account_number" maxlength="40" inputmode="numeric"></div>
             <div class="field"><label for="s-ifsc">IFSC</label><input id="s-ifsc" name="ifsc" maxlength="11" style="text-transform:uppercase" placeholder="SBIN0001234"></div>

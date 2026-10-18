@@ -31,7 +31,7 @@ SETTINGS_FIELDS = (
     ("business_name", "Business name"), ("address", "Address"), ("phone", "Phone"), ("email", "E-Mail"),
     ("gstin", "GSTIN/UIN"), ("pan", "PAN"), ("state", "State"), ("state_code", "State code"),
     ("bank_name", "Bank name"), ("account_name", "Account holder"), ("account_number", "Account number"),
-    ("ifsc", "IFSC"), ("upi_id", "UPI ID"), ("invoice_prefix", "Invoice prefix"), ("invoice_suffix", "Invoice suffix"),
+    ("ifsc", "IFSC"), ("bank_branch", "Branch"), ("upi_id", "UPI ID"), ("invoice_prefix", "Invoice prefix"), ("invoice_suffix", "Invoice suffix"),
     ("invoice_digits", "Digits in invoice number"), ("default_payment_terms_days", "Default payment terms (days)"),
     ("invoice_terms", "Terms & conditions"), ("invoice_notes", "Default notes"),
     ("footer_phone", "Footer: call number"), ("footer_whatsapp", "Footer: WhatsApp number"),

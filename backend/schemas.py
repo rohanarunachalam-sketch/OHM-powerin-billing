@@ -218,6 +218,7 @@ class SettingsUpdate(BaseModel):
     account_name: _short(200) = ""
     account_number: _short(40) = ""
     ifsc: _short(11) = ""
+    bank_branch: _short(200) = ""
     upi_id: _short(100) = ""
     invoice_prefix: _short(20) = "INV-"
     invoice_suffix: _short(20) = ""
@@ -303,6 +304,7 @@ class SettingsOut(ORMModel):
     account_name: str
     account_number: str
     ifsc: str
+    bank_branch: str = ""
     upi_id: str
     invoice_prefix: str
     invoice_suffix: str

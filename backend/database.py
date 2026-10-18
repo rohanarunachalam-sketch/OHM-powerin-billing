@@ -88,6 +88,7 @@ def _add_missing_columns() -> None:
         "business_settings": {
             "invoice_suffix": "VARCHAR(20) NOT NULL DEFAULT ''",
             "invoice_digits": "INTEGER NOT NULL DEFAULT 4",
+            "bank_branch": "VARCHAR(200) NOT NULL DEFAULT ''",
             "logo_heights": "JSON NOT NULL DEFAULT '[20, 20, 20]'",
         },
     }

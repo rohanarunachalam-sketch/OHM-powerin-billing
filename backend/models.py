@@ -43,6 +43,7 @@ class BusinessSettings(Base):
     account_name: Mapped[str] = mapped_column(String(200), default="")
     account_number: Mapped[str] = mapped_column(String(40), default="")
     ifsc: Mapped[str] = mapped_column(String(11), default="")
+    bank_branch: Mapped[str] = mapped_column(String(200), default="", server_default="")
     upi_id: Mapped[str] = mapped_column(String(100), default="")
     invoice_prefix: Mapped[str] = mapped_column(String(20), default="INV-")
     invoice_suffix: Mapped[str] = mapped_column(String(20), default="", server_default="")

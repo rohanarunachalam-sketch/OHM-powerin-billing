@@ -125,7 +125,7 @@ export function renderInvoiceDocument(inv, { logoUrls = [], logoHeights = [] } =
   const summaryRows = groups.map((g) => `<tr><td class="blank"></td><td class="r">${amount(g.taxable_amount)}</td><td class="r">${pct(g.gst_rate)}</td><td class="r">${fmt(taxOf(g))}</td><td class="r">${fmt(taxOf(g))}</td></tr>`).join("");
 
   // ---- payment details / terms ----
-  const bank = [["Account holder", b.account_name || b.business_name], ["Bank", b.bank_name], ["Account no.", b.account_number], ["IFSC", b.ifsc], ["UPI ID", b.upi_id]]
+  const bank = [["Account holder", b.account_name || b.business_name], ["Bank", b.bank_name], ["Branch", b.bank_branch], ["Account no.", b.account_number], ["IFSC", b.ifsc], ["UPI ID", b.upi_id]]
     .filter(([, value]) => value);
   const hasBank = ["bank_name", "account_number", "ifsc", "upi_id"].some((k) => b[k]);
 

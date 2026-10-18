@@ -159,6 +159,6 @@ def remove_logo_file(settings: BusinessSettings, slot: int = 1) -> None:
 def business_snapshot(settings: BusinessSettings) -> dict:
     fields = (
         "business_name", "address", "phone", "email", "gstin", "pan", "state", "state_code",
-        "bank_name", "account_name", "account_number", "ifsc", "upi_id",
+        "bank_name", "account_name", "account_number", "ifsc", "bank_branch", "upi_id",
     )
     return {field: getattr(settings, field) or "" for field in fields}
