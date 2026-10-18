@@ -285,6 +285,17 @@ def test_reference_fields_default_to_dash_in_pdf(client):
     assert "Other Reference" in text and "ESN-778" in text and "9876543210" in text
 
 
+def test_pdf_from_older_layout_is_rerendered(client):
+    from backend.config import INVOICE_DIR
+    from backend.pdf_generator import PDF_CREATOR
+    customer_id = client.get("/api/customers").json()["items"][0]["id"]
+    body = client.post("/api/invoices", json=_invoice_payload(customer_id)).json()
+    stored = max(INVOICE_DIR.glob("*.pdf"), key=lambda p: p.stat().st_mtime)
+    stored.write_bytes(b"%PDF-1.4 stale layout")
+    pdf = client.get(f"/api/invoices/{body['id']}/pdf")
+    assert PDF_CREATOR.encode() in pdf.content and b"stale layout" not in pdf.content
+
+
 def test_product_csv_import_and_part_no_on_invoice(client):
     csv_text = (
         "Part No,Description of Goods,HSN/SAC,Unit,Price,GST %\n"

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, object_session, selectinload
 
 from ..config import INVOICE_DIR
 from ..errors import AppError, ConflictError, NotFoundError
-from ..pdf_generator import generate_invoice_pdf
+from ..pdf_generator import PDF_CREATOR, generate_invoice_pdf
 from ..models import BusinessSettings, Customer, DiscountType, Invoice, InvoiceItem, InvoiceStatus, Product
 from ..schemas import InvoiceIn, InvoiceItemOut, InvoiceOut, InvoiceSummaryOut, TaxBreakupOut
 from . import settings_service
@@ -344,7 +344,15 @@ def pdf_file(invoice: Invoice) -> Path | None:
     if not invoice.pdf_path:
         return None
     path = INVOICE_DIR / invoice.pdf_path
-    return path if path.is_file() else None
+    return path if path.is_file() and _current_layout(path) else None
+
+
+def _current_layout(path: Path) -> bool:
+    """False for a PDF rendered by an older layout, so it is re-rendered instead of served stale."""
+    try:
+        return PDF_CREATOR.encode() in path.read_bytes()
+    except OSError:
+        return False
 
 
 def ensure_pdf(db: Session, invoice: Invoice) -> Path:

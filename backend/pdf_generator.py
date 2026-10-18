@@ -139,6 +139,9 @@ FILL_BAND = colors.HexColor("#f0f0f0")  # section labels, total row
 WHITE = colors.white
 
 LEAD = 3.7           # line height at 8 pt (mm)
+# Bump LAYOUT_VERSION whenever the PDF layout changes: stored PDFs from an older layout are then re-rendered.
+LAYOUT_VERSION = 3
+PDF_CREATOR = f"OHM Powerin Billing (layout {LAYOUT_VERSION})"
 CONTINUED_H = 6.0    # "Continued on next page" row
 
 Line = tuple[str, bool, float]  # (text, bold, font size)
@@ -331,7 +334,7 @@ class InvoiceTemplate:
         self.c.setTitle(f"Tax Invoice {inv.invoice_number}")
         self.c.setAuthor(inv.business.get("business_name", ""))
         self.c.setSubject(f"Invoice for {inv.customer.get('display_name', '')}")
-        self.c.setCreator("OHM Powerin Billing")
+        self.c.setCreator(PDF_CREATOR)
 
         rows = [self.make_row(i, item) for i, item in enumerate(inv.items, start=1)]
         pages: list[list[dict]] = []

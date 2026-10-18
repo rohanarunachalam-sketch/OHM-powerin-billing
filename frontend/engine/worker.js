@@ -39,7 +39,7 @@ async function init() {
   await new Promise((resolve, reject) => py.FS.syncfs(true, (error) => (error ? reject(error) : resolve())));
 
   progress("Loading the billing application…");
-  const archive = await (await fetch(HERE + "app.zip")).arrayBuffer();
+  const archive = await (await fetch(HERE + "app.zip", { cache: "no-cache" })).arrayBuffer();
   py.unpackArchive(archive, "zip", { extractDir: "/app" });
   await py.runPythonAsync("import sys\nif '/app' not in sys.path: sys.path.insert(0, '/app')\nimport shim");
   handle = py.pyimport("shim").handle;
