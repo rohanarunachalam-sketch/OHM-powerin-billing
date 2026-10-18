@@ -141,7 +141,7 @@ WHITE = colors.white
 LEAD = 3.7           # line height at 8 pt (mm)
 # Bump LAYOUT_VERSION whenever the PDF layout changes: stored PDFs from an older layout are then re-rendered.
 LAYOUT_VERSION = 3
-PDF_CREATOR = f"OHM Powerin Billing (layout {LAYOUT_VERSION})"
+PDF_CREATOR = f"OHM Powerin Billing - layout {LAYOUT_VERSION}"  # no brackets: they get escaped inside the PDF
 CONTINUED_H = 6.0    # "Continued on next page" row
 
 Line = tuple[str, bool, float]  # (text, bold, font size)
