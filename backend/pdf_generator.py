@@ -332,7 +332,7 @@ class InvoiceTemplate:
         rows = [self.make_row(i, item) for i, item in enumerate(inv.items, start=1)]
         pages: list[list[dict]] = []
         # One page whenever possible: if the normal spacing needs more, retry with tighter spacing and keep the shorter result.
-        for k in (1.0, 0.85, 0.7):
+        for k in (1.0, 0.9, 0.8, 0.7, 0.6, 0.5):
             self.k = k
             self.__dict__.pop("_cols", None)
             candidate = self._plan(rows)
