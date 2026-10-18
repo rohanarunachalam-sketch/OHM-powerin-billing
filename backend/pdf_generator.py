@@ -254,6 +254,10 @@ class InvoiceTemplate:
         leading = leading or size * 0.3528 * 1.42
         return len(_wrap(value, self.bold if bold else self.regular, size, w)) * leading
 
+    def sc(self, value: float, floor: float) -> float:
+        """A spacing value scaled by the compact factor, but never below `floor` (so text never collides)."""
+        return max(floor, value * self.k)
+
     def money(self, value: Decimal) -> str:
         return format_indian(value)
 
@@ -598,7 +602,7 @@ class CorporateTemplate(InvoiceTemplate):
             h = sum(self.para_h(v, w - 2 * pad, size, bold) + 0.5 for v, bold, size, _ in lines)
             blocks.append((label, lines, h))
         body_h = max(h for _, _, h in blocks) + 5.0
-        height = band_h + max(body_h, 22.0 * self.k)
+        height = band_h + max(body_h, self.sc(22.0, 16.0))
 
         x = self.left
         for (label, lines, _), w in zip(blocks, widths):
@@ -641,7 +645,7 @@ class CorporateTemplate(InvoiceTemplate):
 
     def row_height(self, row: dict) -> float:
         text_h = max(len(row["part"]) * LEAD, len(row["name"]) * LEAD + len(row["desc"]) * 3.3, LEAD)
-        return max(text_h + 4.4 * self.k, 8.0 * self.k)
+        return max(text_h + self.sc(4.4, 3.2), self.sc(8.0, 5.5))
 
     def draw_row(self, y: float, row: dict) -> None:
         item, ty = row["item"], y + 2.4
@@ -686,24 +690,25 @@ class CorporateTemplate(InvoiceTemplate):
         for label, value in lines:
             self.text(am0 - 3.0, ty, label, 8, True, "r", SOFT if label == "Round Off" else TEXT)
             self.text(am1 - 2.2, ty, value, 8.4, False, "r")
-            ty += 5.0 * self.k
+            ty += self.sc(5.0, 4.1)
         ty += 1.2
         self.line(am0, y, am0, ty, 0.25, LIGHT)
         self.line(L, ty, R, ty, 1.0, DARK)               # heavier rule above the total
-        self.rect(L, ty, W, 9.0 * self.k, fill=FILL_BAND)
+        box = self.sc(9.0, 8.0)
+        self.rect(L, ty, W, box, fill=FILL_BAND)
         total_text = f"{self.currency} {self.money(inv.grand_total)}"
         # The label sits just left of the amount however wide the amount is.
-        self.text(R - 2.5 - self.tw(total_text, 12.5, True) - 4.0, ty + 2.5 * self.k, "Total", 10.5, True, "r")
-        self.text(R - 2.5, ty + 2.2 * self.k, total_text, 12.5, True, "r")
-        self.line(L, ty + 9.0 * self.k, R, ty + 9.0 * self.k, 0.5, DARK)
-        y = ty + 9.0 * self.k
+        self.text(R - 2.5 - self.tw(total_text, 12.5, True) - 4.0, ty + 2.5 * box / 9.0, "Total", 10.5, True, "r")
+        self.text(R - 2.5, ty + 2.2 * box / 9.0, total_text, 12.5, True, "r")
+        self.line(L, ty + box, R, ty + box, 0.5, DARK)
+        y = ty + box
 
         # --- amount chargeable (in words) ---
         self.text(L + 3.0, y + 2.0, "Amount Chargeable (in words)", 7.8, True, "l", SOFT)
         self.text(R - 3.0, y + 2.0, "E. & O.E", 7.8, True, "r", SOFT)
-        wy = y + 6.6 * self.k
+        wy = y + self.sc(6.6, 5.8)
         wy += self.para(L + 3.0, wy, self._inr(inv.amount_in_words), W - 6.0, 9, True)
-        y = wy + 2.2 * self.k
+        y = wy + self.sc(2.2, 1.6)
         self.line(L, y, R, y, 0.5, DARK)
 
         # --- tax summary ---
@@ -734,14 +739,14 @@ class CorporateTemplate(InvoiceTemplate):
             self.text(xs[5] - 2.2, gy + 1.5, self.money(tax), 8, False, "r")
             taxable_total += g["taxable"]
             tax_total += tax
-            gy += 5.4 * self.k
+            gy += self.sc(5.4, 4.6)
             self.line(L, gy, R, gy, 0.25, LIGHT)
         self.line(L, gy, R, gy, 0.5, MID)
         self.text(xs[1] - 2.2, gy + 1.5, "Total", 8, True, "r")
         self.text(xs[2] - 2.2, gy + 1.5, self.money(taxable_total), 8, True, "r")
         self.text(xs[4] - 2.2, gy + 1.5, self.money(tax_total), 8, True, "r")
         self.text(xs[5] - 2.2, gy + 1.5, self.money(tax_total), 8, True, "r")
-        gy += 5.4 * self.k
+        gy += self.sc(5.4, 4.6)
         for xv in xs[1:-1]:
             self.line(xv, y + head_h / 2 if xv == xs[3] else y, xv, gy, 0.25, LIGHT)
         self.line(L, gy, R, gy, 0.5, DARK)
@@ -763,7 +768,7 @@ class CorporateTemplate(InvoiceTemplate):
         if inv.terms:
             ry += self.para(L + half + pad, ry, "Terms & Conditions", half - 2 * pad, 8, True) + 0.4
             ry += self.para(L + half + pad, ry, inv.terms, half - 2 * pad, 7.6, False, SOFT)
-        info_h = max(ly, ry, y + 22.0 * self.k) + 2.4 - y
+        info_h = max(ly, ry, y + self.sc(22.0, 16.0)) + 2.4 - y
         self.line(L + half, y, L + half, y + info_h, 0.4, MID)
         y += info_h
         self.line(L, y, R, y, 0.5, MID)
@@ -783,7 +788,7 @@ class CorporateTemplate(InvoiceTemplate):
                 by += self.para(L + pad + 22.0, by, str(value), half - 2 * pad - 22.0, 8, True) + 0.7
         else:
             by += self.para(L + pad, by, "Bank details not provided.", half - 2 * pad, 8, False, SOFT)
-        bank_h = max(by, y + 30.0 * self.k) + 2.0 - y
+        bank_h = max(by, y + self.sc(30.0, 24.0)) + 2.0 - y
         cx = L + half + half / 2
         self.text(cx, y + 3.0, f"for {b.get('business_name') or ''}", 9, True, "c")
         sign_y = y + bank_h - 9.0
@@ -795,7 +800,7 @@ class CorporateTemplate(InvoiceTemplate):
 
         # --- computer generated ---
         self.text((L + R) / 2, y + 1.8, "This is a Computer Generated Invoice", 7.6, True, "c", SOFT)
-        y += 6.0 * self.k
+        y += self.sc(6.0, 5.0)
         return y - start
 
     # -- per-page frame and contact footer -----------------------------------------------------------------------------------
