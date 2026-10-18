@@ -110,6 +110,7 @@ def _apply(
     invoice.other_reference = payload.other_reference
     invoice.contact_phone = payload.contact_phone
     invoice.esn = payload.esn
+    invoice.page_mode = payload.page_mode
     invoice.subtotal = totals.subtotal
     invoice.discount = totals.discount
     invoice.taxable_amount = totals.taxable_amount
@@ -482,6 +483,7 @@ def to_out(invoice: Invoice, db: Session | None = None) -> InvoiceOut:
         other_reference=invoice.other_reference or "",
         contact_phone=invoice.contact_phone or "",
         esn=invoice.esn or "",
+        page_mode=invoice.page_mode or "fit",
         subtotal=invoice.subtotal,
         discount=invoice.discount,
         taxable_amount=invoice.taxable_amount,

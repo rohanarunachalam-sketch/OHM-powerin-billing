@@ -52,6 +52,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
     other_reference: "",
     contact_phone: "",
     esn: "",
+    page_mode: "fit",
     invoice_date: todayISO(),
     place_of_supply: "",
     notes: settings.invoice_notes || "",
@@ -81,6 +82,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
       other_reference: inv.other_reference || "",
       contact_phone: inv.contact_phone || "",
       esn: inv.esn || "",
+      page_mode: inv.page_mode || "fit",
       invoice_date: editingId ? inv.invoice_date : todayISO(),
       place_of_supply: inv.place_of_supply,
       notes: inv.notes,
@@ -132,6 +134,10 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
               <div class="field"><label for="inv-ref">Other reference</label><input id="inv-ref" data-field="other_reference" maxlength="100" placeholder="Optional"></div>
               <div class="field"><label for="inv-phone">Phone</label><input id="inv-phone" data-field="contact_phone" maxlength="100" placeholder="Optional"></div>
               <div class="field"><label for="inv-esn">ESN</label><input id="inv-esn" data-field="esn" maxlength="100" placeholder="Optional"></div>
+              <div class="field"><label for="inv-pages">PDF pages</label>
+                <select id="inv-pages" data-field="page_mode"><option value="fit">Fit on one page</option><option value="pages">Continue on more pages</option></select>
+                <div class="field-hint">"Fit on one page" shrinks the invoice to one A4 sheet; very long invoices still continue.</div>
+              </div>
               <div class="field span-2"><label for="inv-pos">Place of supply</label>
                 <select id="inv-pos" data-field="place_of_supply">${stateOptions(meta.states, "", "Same as customer's state")}</select>
                 <div class="field-hint" data-pos-hint></div>
@@ -196,7 +202,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
   // -------------------------------------------------------------------------
 
   fields.invoice_number.value = state.invoice_number;
-  for (const name of ["other_reference", "contact_phone", "esn"]) fields[name].value = state[name];
+  for (const name of ["other_reference", "contact_phone", "esn", "page_mode"]) fields[name].value = state[name];
   fields.invoice_date.value = state.invoice_date;
   fields.notes.value = state.notes;
   fields.terms.value = state.terms;
@@ -223,6 +229,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
   for (const name of ["invoice_number", "other_reference", "contact_phone", "esn", "notes", "terms"]) {
     fields[name].addEventListener("input", () => { state[name] = fields[name].value; markDirty(); });
   }
+  fields.page_mode.addEventListener("change", () => { state.page_mode = fields.page_mode.value; markDirty(); });
   fields.place_of_supply.addEventListener("change", () => {
     state.place_of_supply = fields.place_of_supply.value;
     markDirty();
@@ -503,6 +510,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
       other_reference: state.other_reference.trim(),
       contact_phone: state.contact_phone.trim(),
       esn: state.esn.trim(),
+      page_mode: state.page_mode,
       invoice_date: state.invoice_date,
       place_of_supply: state.place_of_supply,
       status,

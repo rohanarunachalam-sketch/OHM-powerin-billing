@@ -100,6 +100,7 @@ def _add_missing_columns() -> None:
     })
     wanted["invoice_items"] = {"part_no": "VARCHAR(64) NOT NULL DEFAULT ''"}
     wanted["invoices"] = {name: "VARCHAR(100) NOT NULL DEFAULT ''" for name in ("other_reference", "contact_phone", "esn")}
+    wanted["invoices"]["page_mode"] = "VARCHAR(10) NOT NULL DEFAULT 'fit'"
     inspector = inspect(engine)
     cols = {c["name"] for c in inspector.get_columns("business_settings")}
     first_footer = "footer_phone" not in cols

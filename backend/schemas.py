@@ -368,6 +368,7 @@ class InvoiceIn(BaseModel):
     other_reference: _short(100) = ""
     contact_phone: _short(100) = ""
     esn: _short(100) = ""
+    page_mode: Literal["fit", "pages"] = "fit"
     status: EditableStatus = "Pending"
     notes: _short(2000) = ""
     terms: _short(3000) = ""
@@ -464,6 +465,7 @@ class InvoiceOut(BaseModel):
     other_reference: str = ""
     contact_phone: str = ""
     esn: str = ""
+    page_mode: str = "fit"
     subtotal: Decimal
     discount: Decimal
     taxable_amount: Decimal

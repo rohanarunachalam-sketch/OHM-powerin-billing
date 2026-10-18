@@ -140,8 +140,10 @@ WHITE = colors.white
 
 LEAD = 3.7           # line height at 8 pt (mm)
 # Bump LAYOUT_VERSION whenever the PDF layout changes: stored PDFs from an older layout are then re-rendered.
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 PDF_CREATOR = f"OHM Powerin Billing - layout {LAYOUT_VERSION}"  # no brackets: they get escaped inside the PDF
+MIN_SCALE = 0.6       # smallest "fit on one page" scale (8 pt text prints at about 5 pt)
+OVERFLOW_SCALE = 0.8  # "fit on one page" invoices too long for one page continue at this scale
 CONTINUED_H = 6.0    # "Continued on next page" row
 
 Line = tuple[str, bool, float]  # (text, bold, font size)
@@ -197,7 +199,7 @@ class InvoiceTemplate:
         self.c: pdf_canvas.Canvas
         self.dry = False
         self.footer_h = 0.0
-        self.k = 1.0  # spacing scale; build() shrinks it (compact mode) to keep an invoice on a single page
+        self.z = 1.0  # page scale; < 1 draws everything smaller (same proportions) to fit one page
 
     @property
     def width_mm(self) -> float:
@@ -206,7 +208,20 @@ class InvoiceTemplate:
     # -- drawing primitives (mm; y measured from the top) -------------------------------------
 
     def _y(self, y: float) -> float:
-        return (PAGE_H - y) * mm
+        return (PAGE_H / self.z - y) * mm
+
+    def _set_scale(self, z: float) -> None:
+        """Lay out on a virtual page 1/z times A4 and scale it down by z when drawing.
+
+        Text, rules and spacing all shrink together, so nothing can overlap; the description column gets the
+        extra virtual width, so long names also wrap less.
+        """
+        cls = type(self)
+        self.z = z
+        for name in ("left", "right", "top", "bottom", "frame_bottom"):
+            if hasattr(cls, name):
+                setattr(self, name, getattr(cls, name) / z)
+        self.__dict__.pop("_cols", None)
 
     def line(self, x1: float, y1: float, x2: float, y2: float, width: float = 0.5, color=DARK) -> None:
         if self.dry:
@@ -256,10 +271,6 @@ class InvoiceTemplate:
     def para_h(self, value: str, w: float, size: float = 8, bold: bool = False, leading: float | None = None) -> float:
         leading = leading or size * 0.3528 * 1.42
         return len(_wrap(value, self.bold if bold else self.regular, size, w)) * leading
-
-    def sc(self, value: float, floor: float) -> float:
-        """A spacing value scaled by the compact factor, but never below `floor` (so text never collides)."""
-        return max(floor, value * self.k)
 
     def money(self, value: Decimal) -> str:
         return format_indian(value)
@@ -336,19 +347,16 @@ class InvoiceTemplate:
         self.c.setSubject(f"Invoice for {inv.customer.get('display_name', '')}")
         self.c.setCreator(PDF_CREATOR)
 
-        rows = [self.make_row(i, item) for i, item in enumerate(inv.items, start=1)]
-        pages: list[list[dict]] = []
-        # One page whenever possible: if the normal spacing needs more, retry with tighter spacing and keep the shorter result.
-        for k in (1.0, 0.9, 0.8, 0.7, 0.6, 0.5):
-            self.k = k
-            self.__dict__.pop("_cols", None)
-            candidate = self._plan(rows)
-            if not pages or len(candidate) < len(pages):
-                pages, best = candidate, k
-            if len(pages) == 1:
-                break
-        self.k = best
-        pages = self._plan(rows)
+        if inv.page_mode == "pages":  # full size, continuing onto as many pages as needed
+            pages = self._plan_at(1.0)
+        else:  # fit on one page: shrink step by step; if even the smallest scale is not enough, continue compactly
+            steps = int(round((1.0 - MIN_SCALE) / 0.025))
+            for z in (round(1.0 - 0.025 * n, 3) for n in range(steps + 1)):
+                pages = self._plan_at(z)
+                if len(pages) == 1:
+                    break
+            else:
+                pages = self._plan_at(OVERFLOW_SCALE)
 
         for number, page_rows in enumerate(pages, start=1):
             self._draw_page(page_rows, number, len(pages))
@@ -356,6 +364,10 @@ class InvoiceTemplate:
         self.c.save()
         os.replace(tmp, target)  # atomic: never leave a half-written PDF behind
         return target
+
+    def _plan_at(self, z: float) -> list[list[dict]]:
+        self._set_scale(z)
+        return self._plan([self.make_row(i, item) for i, item in enumerate(self.invoice.items, start=1)])
 
     def _plan(self, rows: list[dict]) -> list[list[dict]]:
         """Measure the fixed blocks (dry run) and split the item rows into pages at the current spacing."""
@@ -372,6 +384,7 @@ class InvoiceTemplate:
         return self._paginate(rows, first_cap, next_cap, CONTINUED_H, self.footer_h)
 
     def _draw_page(self, rows: list[dict], number: int, count: int) -> None:
+        self.c.scale(self.z, self.z)  # canvas state resets on showPage, so this applies to this page only
         y = self.top
         if number == 1:
             y += self.header_first()
@@ -399,7 +412,7 @@ class InvoiceTemplate:
 
     # -- logos ------------------------------------------------------------------------------------------------
 
-    def draw_logo_row(self, y: float, max_h: float = 40.0, pad: float = 3.0) -> float:
+    def draw_logo_row(self, y: float, max_h: float = 22.0, pad: float = 3.0) -> float:
         """Logos across the header: first at the left, last at the right (middle one centred). Returns the height used."""
         images = []
         for position, path in enumerate(self.logos[:3]):
@@ -514,14 +527,14 @@ class CorporateTemplate(InvoiceTemplate):
 
     @property
     def split_x(self) -> float:
-        return self.left + 112.0  # divider between the seller / consignee column and the details column
+        return self.left + self.width_mm * 112.0 / 190.0  # divider between the seller / consignee column and the details column
 
     def header_first(self) -> float:
         inv, b = self.invoice, self.invoice.business
         y = self.top
-        logo_h = self.draw_logo_row(y + 3.0)
+        logo_h = self.draw_logo_row(y + 2.0)
         if logo_h:
-            y += logo_h + 6.0
+            y += logo_h + 4.0
             self.line(self.left, y, self.right, y, 0.5, MID)
         pad = 3.0
         col_w = self.split_x - self.left - 2 * pad
@@ -605,7 +618,7 @@ class CorporateTemplate(InvoiceTemplate):
             h = sum(self.para_h(v, w - 2 * pad, size, bold) + 0.5 for v, bold, size, _ in lines)
             blocks.append((label, lines, h))
         body_h = max(h for _, _, h in blocks) + 5.0
-        height = band_h + max(body_h, self.sc(22.0, 16.0))
+        height = band_h + max(body_h, 22.0)
 
         x = self.left
         for (label, lines, _), w in zip(blocks, widths):
@@ -648,7 +661,7 @@ class CorporateTemplate(InvoiceTemplate):
 
     def row_height(self, row: dict) -> float:
         text_h = max(len(row["part"]) * LEAD, len(row["name"]) * LEAD + len(row["desc"]) * 3.3, LEAD)
-        return max(text_h + self.sc(4.4, 3.2), self.sc(8.0, 5.5))
+        return max(text_h + 4.4, 8.0)
 
     def draw_row(self, y: float, row: dict) -> None:
         item, ty = row["item"], y + 2.4
@@ -693,30 +706,29 @@ class CorporateTemplate(InvoiceTemplate):
         for label, value in lines:
             self.text(am0 - 3.0, ty, label, 8, True, "r", SOFT if label == "Round Off" else TEXT)
             self.text(am1 - 2.2, ty, value, 8.4, False, "r")
-            ty += self.sc(5.0, 4.1)
+            ty += 5.0
         ty += 1.2
         self.line(am0, y, am0, ty, 0.25, LIGHT)
         self.line(L, ty, R, ty, 1.0, DARK)               # heavier rule above the total
-        box = self.sc(9.0, 8.0)
-        self.rect(L, ty, W, box, fill=FILL_BAND)
+        self.rect(L, ty, W, 9.0, fill=FILL_BAND)
         total_text = f"{self.currency} {self.money(inv.grand_total)}"
         # The label sits just left of the amount however wide the amount is.
-        self.text(R - 2.5 - self.tw(total_text, 12.5, True) - 4.0, ty + 2.5 * box / 9.0, "Total", 10.5, True, "r")
-        self.text(R - 2.5, ty + 2.2 * box / 9.0, total_text, 12.5, True, "r")
-        self.line(L, ty + box, R, ty + box, 0.5, DARK)
-        y = ty + box
+        self.text(R - 2.5 - self.tw(total_text, 12.5, True) - 4.0, ty + 2.5, "Total", 10.5, True, "r")
+        self.text(R - 2.5, ty + 2.2, total_text, 12.5, True, "r")
+        self.line(L, ty + 9.0, R, ty + 9.0, 0.5, DARK)
+        y = ty + 9.0
 
         # --- amount chargeable (in words) ---
         self.text(L + 3.0, y + 2.0, "Amount Chargeable (in words)", 7.8, True, "l", SOFT)
         self.text(R - 3.0, y + 2.0, "E. & O.E", 7.8, True, "r", SOFT)
-        wy = y + self.sc(6.6, 5.8)
+        wy = y + 6.6
         wy += self.para(L + 3.0, wy, self._inr(inv.amount_in_words), W - 6.0, 9, True)
-        y = wy + self.sc(2.2, 1.6)
+        y = wy + 2.2
         self.line(L, y, R, y, 0.5, DARK)
 
         # --- tax summary ---
         groups = self._tax_groups()
-        widths = [90.0, 34.0, 20.0, 26.0, 20.0]
+        widths = [W - 100.0, 34.0, 20.0, 26.0, 20.0]
         xs = [L]
         for w in widths:
             xs.append(xs[-1] + w)
@@ -742,14 +754,14 @@ class CorporateTemplate(InvoiceTemplate):
             self.text(xs[5] - 2.2, gy + 1.5, self.money(tax), 8, False, "r")
             taxable_total += g["taxable"]
             tax_total += tax
-            gy += self.sc(5.4, 4.6)
+            gy += 5.4
             self.line(L, gy, R, gy, 0.25, LIGHT)
         self.line(L, gy, R, gy, 0.5, MID)
         self.text(xs[1] - 2.2, gy + 1.5, "Total", 8, True, "r")
         self.text(xs[2] - 2.2, gy + 1.5, self.money(taxable_total), 8, True, "r")
         self.text(xs[4] - 2.2, gy + 1.5, self.money(tax_total), 8, True, "r")
         self.text(xs[5] - 2.2, gy + 1.5, self.money(tax_total), 8, True, "r")
-        gy += self.sc(5.4, 4.6)
+        gy += 5.4
         for xv in xs[1:-1]:
             self.line(xv, y + head_h / 2 if xv == xs[3] else y, xv, gy, 0.25, LIGHT)
         self.line(L, gy, R, gy, 0.5, DARK)
@@ -771,7 +783,7 @@ class CorporateTemplate(InvoiceTemplate):
         if inv.terms:
             ry += self.para(L + half + pad, ry, "Terms & Conditions", half - 2 * pad, 8, True) + 0.4
             ry += self.para(L + half + pad, ry, inv.terms, half - 2 * pad, 7.6, False, SOFT)
-        info_h = max(ly, ry, y + self.sc(22.0, 16.0)) + 2.4 - y
+        info_h = max(ly, ry, y + 22.0) + 2.4 - y
         self.line(L + half, y, L + half, y + info_h, 0.4, MID)
         y += info_h
         self.line(L, y, R, y, 0.5, MID)
@@ -791,7 +803,7 @@ class CorporateTemplate(InvoiceTemplate):
                 by += self.para(L + pad + 22.0, by, str(value), half - 2 * pad - 22.0, 8, True) + 0.7
         else:
             by += self.para(L + pad, by, "Bank details not provided.", half - 2 * pad, 8, False, SOFT)
-        bank_h = max(by, y + self.sc(30.0, 24.0)) + 2.0 - y
+        bank_h = max(by, y + 30.0) + 2.0 - y
         cx = L + half + half / 2
         self.text(cx, y + 3.0, f"for {b.get('business_name') or ''}", 9, True, "c")
         sign_y = y + bank_h - 9.0
@@ -803,7 +815,7 @@ class CorporateTemplate(InvoiceTemplate):
 
         # --- computer generated ---
         self.text((L + R) / 2, y + 1.8, "This is a Computer Generated Invoice", 7.6, True, "c", SOFT)
-        y += self.sc(6.0, 5.0)
+        y += 6.0
         return y - start
 
     # -- per-page frame and contact footer -----------------------------------------------------------------------------------

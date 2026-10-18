@@ -285,6 +285,19 @@ def test_reference_fields_default_to_dash_in_pdf(client):
     assert "Other Reference" in text and "ESN-778" in text and "9876543210" in text
 
 
+def test_fit_mode_keeps_15_items_on_one_page_and_pages_mode_continues(client):
+    from io import BytesIO
+    customer_id = client.get("/api/customers").json()["items"][0]["id"]
+    payload = _invoice_payload(customer_id)
+    payload["items"] = [{**payload["items"][0], "name": f"Spare part number {n} with a longer name"} for n in range(1, 16)]
+    counts = {}
+    for mode in ("fit", "pages"):
+        body = client.post("/api/invoices", json={**payload, "page_mode": mode}).json()
+        assert body["page_mode"] == mode
+        counts[mode] = len(PdfReader(BytesIO(client.get(f"/api/invoices/{body['id']}/pdf").content)).pages)
+    assert counts == {"fit": 1, "pages": 2}
+
+
 def test_pdf_from_older_layout_is_rerendered(client):
     from backend.config import INVOICE_DIR
     from backend.pdf_generator import PDF_CREATOR

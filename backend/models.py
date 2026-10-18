@@ -112,6 +112,8 @@ class Invoice(Base):
     other_reference: Mapped[str] = mapped_column(String(100), default="", server_default="")
     contact_phone: Mapped[str] = mapped_column(String(100), default="", server_default="")
     esn: Mapped[str] = mapped_column(String(100), default="", server_default="")
+    # PDF layout: "fit" shrinks the invoice onto one A4 page, "pages" keeps full size and continues onto more pages.
+    page_mode: Mapped[str] = mapped_column(String(10), default="fit", server_default="fit")
 
     subtotal: Mapped[Decimal] = mapped_column(Money())
     discount: Mapped[Decimal] = mapped_column(Money())
