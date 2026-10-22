@@ -96,6 +96,7 @@ def to_out(db: Session, settings: BusinessSettings) -> SettingsOut:
         state=settings.state,
         has_logo=logo_file(settings) is not None,
         logos=[logo_file(settings, slot) is not None for slot in LOGO_SLOTS],
+        has_footer_image=footer_image_file() is not None,
         is_configured=is_configured(settings),
         next_invoice_number=number,
     )
@@ -104,7 +105,7 @@ def to_out(db: Session, settings: BusinessSettings) -> SettingsOut:
 def update_settings(db: Session, payload: SettingsUpdate) -> BusinessSettings:
     settings = get_settings(db)
     sizes_changed = list(settings.logo_heights or []) != list(payload.logo_heights) or any(
-        getattr(settings, f) != getattr(payload, f) for f in ("footer_phone", "footer_whatsapp", "footer_email", "footer_address")
+        getattr(settings, f) != getattr(payload, f) for f in ("footer_phone", "footer_whatsapp", "footer_email", "footer_address", "footer_enabled", "footer_image_height")
     )  # either one changes how every stored PDF looks
     format_changed = (settings.invoice_prefix, settings.invoice_suffix) != (payload.invoice_prefix, payload.invoice_suffix)
     for field, value in payload.model_dump().items():
@@ -122,14 +123,19 @@ def update_settings(db: Session, payload: SettingsUpdate) -> BusinessSettings:
     return settings
 
 
-def save_logo(db: Session, content: bytes, slot: int = 1) -> BusinessSettings:
+def _image_extension(content: bytes, what: str) -> str:
     if not content:
         raise AppError("The uploaded file is empty.")
     if len(content) > MAX_LOGO_BYTES:
-        raise AppError("Logo must be smaller than 2 MB.")
+        raise AppError(f"{what} must be smaller than 2 MB.")
     extension = next((ext for magic, ext in LOGO_TYPES.items() if content.startswith(magic)), None)
     if extension is None:
-        raise AppError("Logo must be a PNG or JPEG image.")
+        raise AppError(f"{what} must be a PNG or JPEG image.")
+    return extension
+
+
+def save_logo(db: Session, content: bytes, slot: int = 1) -> BusinessSettings:
+    extension = _image_extension(content, "Logo")
 
     _check_slot(slot)
     settings = get_settings(db)
@@ -154,6 +160,28 @@ def remove_logo_file(settings: BusinessSettings, slot: int = 1) -> None:
         existing.unlink(missing_ok=True)
     if slot == 1:
         settings.logo_path = None
+
+
+def footer_image_file() -> Path | None:
+    """Letterhead image printed at the foot of every page when the text footer is switched off."""
+    candidates = (UPLOAD_DIR / f"footer{ext}" for ext in LOGO_TYPES.values())
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def footer_image_for_pdf(settings: BusinessSettings) -> Path | None:
+    return None if settings.footer_enabled else footer_image_file()
+
+
+def save_footer_image(db: Session, content: bytes) -> BusinessSettings:
+    extension = _image_extension(content, "Footer image")
+    remove_footer_image()
+    (UPLOAD_DIR / f"footer{extension}").write_bytes(content)
+    return get_settings(db)
+
+
+def remove_footer_image() -> None:
+    if existing := footer_image_file():
+        existing.unlink(missing_ok=True)
 
 
 def business_snapshot(settings: BusinessSettings) -> dict:

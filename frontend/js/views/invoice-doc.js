@@ -45,7 +45,7 @@ window.addEventListener("resize", () => document.querySelectorAll("[data-fit-doc
 const ICON_BASE = "assets/icons";
 const contactIcon = (name) => `<img class="d-ico" src="${ICON_BASE}/${name}.svg" alt="">`;
 
-export function renderInvoiceDocument(inv, { logoUrls = [], logoHeights = [] } = {}) {
+export function renderInvoiceDocument(inv, { logoUrls = [], logoHeights = [], footerImageUrl = "", footerImageHeight = 30 } = {}) {
   const b = inv.business;
   const c = inv.customer;
   const billing = c.billing_address || "";
@@ -139,9 +139,16 @@ export function renderInvoiceDocument(inv, { logoUrls = [], logoHeights = [] } =
   }
   if (b.footer_email) contactItems.push([contactIcon("mail"), b.footer_email]);
   const contact = contactItems.map(([ico, text]) => `<span class="d-ci">${ico}${esc(text)}</span>`).join("");
+  const footerOn = b.footer_enabled !== false;  // off: the uploaded letterhead image replaces the strip
+  const letterhead = footerOn
+    ? `<div class="d-strip">${contact ? `<div class="d-contact">${contact}</div>` : ""}${b.footer_address ? `<div class="d-addr">${esc(b.footer_address.replace(/\s+/g, " "))}</div>` : ""}</div>
+    <div class="d-outline"></div>
+    <div class="d-bar"></div>`
+    : `${footerImageUrl ? `<img class="d-fimg" src="${esc(footerImageUrl)}" alt="" style="height:${Number(footerImageHeight) || 30}mm">` : ""}
+    <div class="d-outline"${footerImageUrl ? ` style="bottom:${(Number(footerImageHeight) || 30) + 6}mm"` : ""}></div>`;
 
   return `
-  <div class="doc">
+  <div class="doc"${!footerOn && footerImageUrl ? ` style="padding-bottom:${(Number(footerImageHeight) || 30) + 10}mm"` : ""}>
     ${logos ? `<div class="d-logos">${logos}</div>` : ""}
     <div class="d-head">
       <div class="d-seller">
@@ -203,8 +210,6 @@ export function renderInvoiceDocument(inv, { logoUrls = [], logoHeights = [] } =
     </div>
     <div class="d-cg">This is a Computer Generated Invoice</div>
 
-    <div class="d-strip">${contact ? `<div class="d-contact">${contact}</div>` : ""}${b.footer_address ? `<div class="d-addr">${esc(b.footer_address.replace(/\s+/g, " "))}</div>` : ""}</div>
-    <div class="d-outline"></div>
-    <div class="d-bar"></div>
+    ${letterhead}
   </div>`;
 }

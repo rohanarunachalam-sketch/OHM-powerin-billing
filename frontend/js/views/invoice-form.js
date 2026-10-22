@@ -562,7 +562,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
     try {
       const inv = await api.previewInvoice(payload("Pending"), editingId);
       if (token !== liveToken || !isCurrent()) return;
-      liveEl.innerHTML = renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) });
+      liveEl.innerHTML = renderInvoiceDocument(inv, api.docOptions(settings));
       fitDocument(liveEl);
       liveState.textContent = "";
     } catch {
@@ -606,7 +606,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
     setTitle(`Preview · ${inv.invoice_number}`, `<a href="#/invoices">Invoices</a>`);
     pane.innerHTML = `
       <div class="banner banner-info no-print">${icons.info}<div><b>Preview — not saved yet.</b> These totals were calculated by the server exactly as they will be stored. Review, then save to generate the A4 PDF.</div></div>
-      <div class="doc-shell" data-fit-doc>${renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) })}</div>
+      <div class="doc-shell" data-fit-doc>${renderInvoiceDocument(inv, api.docOptions(settings))}</div>
       <div class="sticky-footer no-print">
         <button type="button" class="btn" data-back>${icons.back}Back to edit</button>
         <span class="spacer"></span>

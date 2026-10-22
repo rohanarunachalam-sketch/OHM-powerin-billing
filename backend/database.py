@@ -97,6 +97,8 @@ def _add_missing_columns() -> None:
         "footer_whatsapp": "VARCHAR(100) NOT NULL DEFAULT ''",
         "footer_email": "VARCHAR(200) NOT NULL DEFAULT ''",
         "footer_address": "TEXT NOT NULL DEFAULT ''",
+        "footer_enabled": "BOOLEAN NOT NULL DEFAULT 1",
+        "footer_image_height": "INTEGER NOT NULL DEFAULT 30",
     })
     wanted["invoice_items"] = {"part_no": "VARCHAR(64) NOT NULL DEFAULT ''"}
     wanted["invoices"] = {name: "VARCHAR(100) NOT NULL DEFAULT ''" for name in ("other_reference", "contact_phone", "esn")}

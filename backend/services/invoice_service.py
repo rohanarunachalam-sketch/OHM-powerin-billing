@@ -385,7 +385,8 @@ def _write_pdf(db: Session, invoice: Invoice) -> Path:
     settings = settings_service.get_settings(db)
     filename = _pdf_filename(invoice)
     target = INVOICE_DIR / filename
-    generate_invoice_pdf(to_out(invoice), target, logo=settings_service.logo_files(settings), logo_heights=settings_service.logo_heights(settings))
+    generate_invoice_pdf(to_out(invoice), target, logo=settings_service.logo_files(settings), logo_heights=settings_service.logo_heights(settings),
+                         footer_image=settings_service.footer_image_for_pdf(settings), footer_image_height=settings.footer_image_height or 30)
     if invoice.pdf_path != filename:
         invoice.pdf_path = filename
         db.commit()
@@ -469,6 +470,7 @@ def to_out(invoice: Invoice, db: Session | None = None) -> InvoiceOut:
     for key in ("footer_phone", "footer_whatsapp", "footer_email", "footer_address"):  # letterhead footer always shows the current text
         if live is not None:
             business[key] = getattr(live, key) or ""
+    business["footer_enabled"] = live.footer_enabled if live is not None else True
     amount_paid = invoice.amount_paid or ZERO
     return InvoiceOut(
         id=invoice.id,

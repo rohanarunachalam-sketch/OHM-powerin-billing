@@ -45,6 +45,31 @@ def delete_logo(slot: int = 1, db: Session = Depends(get_db)) -> SettingsOut:
     return settings_service.to_out(db, settings)
 
 
+@router.post("/footer-image", response_model=SettingsOut)
+async def upload_footer_image(file: UploadFile = File(...), db: Session = Depends(get_db)) -> SettingsOut:
+    content = await file.read(MAX_LOGO_BYTES + 1)
+    if len(content) > MAX_LOGO_BYTES:
+        raise AppError("Footer image must be smaller than 2 MB.")
+    settings = settings_service.save_footer_image(db, content)
+    invoice_service.regenerate_all_pdfs(db)
+    return settings_service.to_out(db, settings)
+
+
+@router.delete("/footer-image", response_model=SettingsOut)
+def delete_footer_image(db: Session = Depends(get_db)) -> SettingsOut:
+    settings_service.remove_footer_image()
+    invoice_service.regenerate_all_pdfs(db)
+    return settings_service.to_out(db, settings_service.get_settings(db))
+
+
+@router.get("/footer-image")
+def get_footer_image() -> Response:
+    path = settings_service.footer_image_file()
+    if path is None:
+        raise NotFoundError("Footer image")
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/logo")
 def get_logo(slot: int = 1, db: Session = Depends(get_db)) -> Response:
     path = settings_service.logo_file(settings_service.get_settings(db), slot)

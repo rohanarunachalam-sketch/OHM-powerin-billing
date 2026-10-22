@@ -140,7 +140,7 @@ WHITE = colors.white
 
 LEAD = 3.7           # line height at 8 pt (mm)
 # Bump LAYOUT_VERSION whenever the PDF layout changes: stored PDFs from an older layout are then re-rendered.
-LAYOUT_VERSION = 4
+LAYOUT_VERSION = 9
 PDF_CREATOR = f"OHM Powerin Billing - layout {LAYOUT_VERSION}"  # no brackets: they get escaped inside the PDF
 MIN_SCALE = 0.6       # smallest "fit on one page" scale (8 pt text prints at about 5 pt)
 OVERFLOW_SCALE = 0.8  # "fit on one page" invoices too long for one page continue at this scale
@@ -191,8 +191,23 @@ class InvoiceTemplate:
     head_h = 8.0                # goods-table header row
     anchor_footer = True        # last-page footer sits at the bottom, the item area stretches to fill
 
-    def __init__(self, invoice: InvoiceOut, logo: Path | list[Path] | None = None, logo_heights: list[float] | None = None) -> None:
+    FOOTER_IMAGE_MARGIN = 4.0   # mm between the footer image and the bottom edge of the sheet
+    FOOTER_IMAGE_GAP = 2.0      # mm between the page border and the footer image
+
+    def __init__(self, invoice: InvoiceOut, logo: Path | list[Path] | None = None, logo_heights: list[float] | None = None,
+                 footer_image: Path | None = None, footer_image_height: float = 30.0) -> None:
         self.invoice = invoice
+        self.footer_image: ImageReader | None = None
+        self.footer_image_size = (0.0, 0.0)  # mm at full scale
+        if footer_image is not None:
+            try:
+                reader = ImageReader(str(footer_image))
+                reader.getSize()  # fails early on a broken image
+                # always as wide as the invoice border; only the height is adjustable (the image stretches)
+                w, h = type(self).right - type(self).left, float(footer_image_height)
+                self.footer_image, self.footer_image_size = reader, (w, h)
+            except Exception:
+                logger.warning("Unreadable footer image at %s", footer_image, exc_info=True)
         self.logos: list[Path] = [logo] if isinstance(logo, Path) else list(logo or [])
         self.logo_heights: list[float] = list(logo_heights or [])
         self.regular, self.bold, self.currency = _fonts()
@@ -221,6 +236,8 @@ class InvoiceTemplate:
         for name in ("left", "right", "top", "bottom", "frame_bottom"):
             if hasattr(cls, name):
                 setattr(self, name, getattr(cls, name) / z)
+        if self.footer_image is not None:  # the content area ends above the footer image
+            self.bottom = (PAGE_H - self.FOOTER_IMAGE_MARGIN - self.footer_image_size[1] - self.FOOTER_IMAGE_GAP) / z
         self.__dict__.pop("_cols", None)
 
     def line(self, x1: float, y1: float, x2: float, y2: float, width: float = 0.5, color=DARK) -> None:
@@ -527,7 +544,7 @@ class CorporateTemplate(InvoiceTemplate):
 
     @property
     def split_x(self) -> float:
-        return self.left + self.width_mm * 112.0 / 190.0  # divider between the seller / consignee column and the details column
+        return self.left + self.width_mm / 2.0  # centred divider between the seller / consignee column and the details column
 
     def header_first(self) -> float:
         inv, b = self.invoice, self.invoice.business
@@ -535,7 +552,7 @@ class CorporateTemplate(InvoiceTemplate):
         logo_h = self.draw_logo_row(y + 2.0)
         if logo_h:
             y += logo_h + 4.0
-            self.line(self.left, y, self.right, y, 0.5, MID)
+        self.frame_top = y  # the logo band (letterhead) stays outside the page border
         pad = 3.0
         col_w = self.split_x - self.left - 2 * pad
 
@@ -578,6 +595,7 @@ class CorporateTemplate(InvoiceTemplate):
     def header_continued(self, number: int, count: int) -> float:
         inv, b = self.invoice, self.invoice.business
         y = self.top
+        self.frame_top = y
         self.text(self.left + 3.0, y + 3.0, b.get("business_name") or "", 11, True, "l", TEXT)
         self.text(self.right - 3.0, y + 3.2, f"Invoice No. {inv.invoice_number}   ·   Dated {format_date(inv.invoice_date)}   ·   Page {number} of {count}", 8, False, "r", SOFT)
         self.line(self.left, y + 14.0, self.right, y + 14.0, 0.5, DARK)
@@ -821,17 +839,26 @@ class CorporateTemplate(InvoiceTemplate):
     # -- per-page frame and contact footer -----------------------------------------------------------------------------------
 
     def draw_frame(self, number: int, count: int) -> None:
-        self.rect(self.left, self.top, self.width_mm, self.frame_bottom - self.top, stroke=DARK, width=0.7)
+        # the contact footer (letterhead) stays outside the border; without one the border runs to frame_bottom
+        bottom = self.bottom if self._has_page_footer() or self.footer_image is not None else self.frame_bottom
+        self.rect(self.left, self.frame_top, self.width_mm, bottom - self.frame_top, stroke=DARK, width=0.7)
 
     frame_bottom = 287.0
+
+    def _has_page_footer(self) -> bool:
+        b = self.invoice.business
+        if b.get("footer_enabled") is False:
+            return False
+        return any((b.get(k) or "").strip() for k in ("footer_phone", "footer_whatsapp", "footer_email", "footer_address"))
 
     def draw_page_footer(self) -> None:
         b = self.invoice.business
         phone, whatsapp, email = (b.get(k) or "" for k in ("footer_phone", "footer_whatsapp", "footer_email"))
         address = " ".join((b.get("footer_address") or "").split())
-        if not (phone or whatsapp or email or address):
+        if self.footer_image is not None:
+            self._draw_footer_image()
+        if not self._has_page_footer():
             return
-        self.line(self.left, self.bottom, self.right, self.bottom, 0.5, DARK)
         items: list[tuple[list[str], str]] = []
         if phone and whatsapp and phone.strip() == whatsapp.strip():
             items.append((["call", "whatsapp"], phone))
@@ -857,6 +884,13 @@ class CorporateTemplate(InvoiceTemplate):
             self.para((self.left + 4.0), y, address, self.width_mm - 8.0, 7.6, True, SOFT, "c")
 
 
+    def _draw_footer_image(self) -> None:
+        w, h = (v / self.z for v in self.footer_image_size)
+        x = (self.left + self.right) / 2 - w / 2
+        top = (PAGE_H - self.FOOTER_IMAGE_MARGIN) / self.z - h
+        self.c.drawImage(self.footer_image, x * mm, self._y(top + h), w * mm, h * mm, mask="auto")
+
+
 TEMPLATES: dict[str, type[InvoiceTemplate]] = {CorporateTemplate.name: CorporateTemplate}
 DEFAULT_TEMPLATE = CorporateTemplate.name
 InvoicePDF = CorporateTemplate  # backwards-compatible name
@@ -868,5 +902,7 @@ def generate_invoice_pdf(
     logo: Path | list[Path] | None = None,
     logo_heights: list[float] | None = None,
     template: str = DEFAULT_TEMPLATE,
+    footer_image: Path | None = None,
+    footer_image_height: float = 30.0,
 ) -> Path:
-    return TEMPLATES[template](invoice, logo, logo_heights).build(target)
+    return TEMPLATES[template](invoice, logo, logo_heights, footer_image, footer_image_height).build(target)

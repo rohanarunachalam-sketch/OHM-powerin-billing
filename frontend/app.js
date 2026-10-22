@@ -8,6 +8,7 @@ import * as invoiceForm from "./js/views/invoice-form.js";
 import * as invoiceView from "./js/views/invoice-view.js";
 import * as customers from "./js/views/customers.js";
 import * as products from "./js/views/products.js";
+import * as materials from "./js/views/materials.js";
 import * as payments from "./js/views/payments.js";
 import * as reports from "./js/views/reports.js";
 import * as settings from "./js/views/settings.js";
@@ -21,6 +22,7 @@ const routes = [
   { pattern: /^\/customers$/, view: customers, nav: "customers" },
   { pattern: /^\/customers\/(\d+)$/, view: customers, nav: "customers", keys: ["id"] },
   { pattern: /^\/products$/, view: products, nav: "products" },
+  { pattern: /^\/materials$/, view: materials, nav: "materials" },
   { pattern: /^\/payments$/, view: payments, nav: "payments" },
   { pattern: /^\/reports$/, view: reports, nav: "reports" },
   { pattern: /^\/settings$/, view: settings, nav: "settings" },

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import FRONTEND_DIR, LOG_LEVEL
 from .database import init_db
 from .errors import register_exception_handlers
-from .routers import customers, dashboard, export, invoices, products, settings
+from .routers import customers, dashboard, export, invoices, materials, products, settings
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 
@@ -47,7 +47,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-for module in (dashboard, customers, products, invoices, settings, export):
+for module in (dashboard, customers, products, materials, invoices, settings, export):
     app.include_router(module.router)
 
 

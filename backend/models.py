@@ -59,6 +59,9 @@ class BusinessSettings(Base):
     footer_whatsapp: Mapped[str] = mapped_column(String(100), default="", server_default="")
     footer_email: Mapped[str] = mapped_column(String(200), default="", server_default="")
     footer_address: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # Off: the text strip is replaced by the uploaded footer image (data/uploads/footer.*), if there is one.
+    footer_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    footer_image_height: Mapped[int] = mapped_column(Integer, default=30, server_default="30")  # mm on the invoice
     # Height in mm of each of the three logos on the invoice header.
     logo_heights: Mapped[list] = mapped_column(JSON, default=lambda: [20, 20, 20], server_default="[20, 20, 20]")
     logo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -185,3 +188,44 @@ class InvoiceItem(Base):
 
     invoice: Mapped[Invoice] = relationship(back_populates="items")
     product: Mapped[Product | None] = relationship()
+
+
+class Material(Base):
+    """Stock item for material management. Not linked to products or invoices."""
+
+    __tablename__ = "materials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    code: Mapped[str] = mapped_column(String(64), default="", index=True)
+    category: Mapped[str] = mapped_column(String(100), default="")
+    unit: Mapped[str] = mapped_column(String(20), default="Nos")
+    quantity: Mapped[Decimal] = mapped_column(ScaledDecimal(3), default=Decimal("0"))  # changed only by stock movements
+    min_stock: Mapped[Decimal] = mapped_column(ScaledDecimal(3), default=Decimal("0"))  # 0 = no low-stock warning
+    purchase_price: Mapped[Decimal] = mapped_column(Money(), default=Decimal("0"))
+    selling_price: Mapped[Decimal] = mapped_column(Money(), default=Decimal("0"))
+    location: Mapped[str] = mapped_column(String(100), default="")
+    supplier: Mapped[str] = mapped_column(String(200), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    movements: Mapped[list["StockMovement"]] = relationship(
+        back_populates="material", cascade="all, delete-orphan", order_by="StockMovement.id.desc()"
+    )
+
+
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="CASCADE"), index=True)
+    movement_date: Mapped[date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(10))  # in | out | set
+    quantity: Mapped[Decimal] = mapped_column(ScaledDecimal(3))  # change in stock (+ / -)
+    balance: Mapped[Decimal] = mapped_column(ScaledDecimal(3))  # stock after this movement
+    unit_price: Mapped[Decimal | None] = mapped_column(Money(), nullable=True)
+    note: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    material: Mapped[Material] = relationship(back_populates="movements")

@@ -65,6 +65,13 @@ export const api = {
   updateProduct: (id, data) => request("PUT", `/api/products/${id}`, data),
   deleteProduct: (id) => request("DELETE", `/api/products/${id}`),
 
+  materials: (params) => request("GET", "/api/materials" + query(params)),
+  createMaterial: (data) => request("POST", "/api/materials", data),
+  updateMaterial: (id, data) => request("PUT", `/api/materials/${id}`, data),
+  deleteMaterial: (id) => request("DELETE", `/api/materials/${id}`),
+  moveStock: (id, data) => request("POST", `/api/materials/${id}/stock`, data),
+  materialMovements: (id) => request("GET", `/api/materials/${id}/movements`),
+
   invoices: (params) => request("GET", "/api/invoices" + query(params)),
   invoice: (id) => request("GET", `/api/invoices/${id}`),
   nextInvoiceNumber: () => request("GET", "/api/invoices/next-number"),
@@ -89,6 +96,19 @@ export const api = {
     form.append("file", file);
     return request("POST", "/api/products/import", form, { isForm: true });
   },
+  uploadFooterImage: (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request("POST", "/api/settings/footer-image", form, { isForm: true });
+  },
+  deleteFooterImage: () => request("DELETE", "/api/settings/footer-image"),
+  footerImageUrl: () => `api/settings/footer-image?v=${Date.now()}`,
+  docOptions: (settings) => ({
+    logoUrls: api.logoUrls(settings),
+    logoHeights: api.logoHeights(settings),
+    footerImageUrl: settings.has_footer_image ? api.footerImageUrl() : "",
+    footerImageHeight: settings.footer_image_height || 30,
+  }),
   deleteLogo: (slot = 1) => request("DELETE", `/api/settings/logo?slot=${slot}`),
   logoUrl: (slot = 1) => `api/settings/logo?slot=${slot}&v=${Date.now()}`,
   logoHeights: (settings) => (settings.logos || []).map((has, i) => (has ? (settings.logo_heights || [])[i] || 20 : null)).filter((h) => h !== null),

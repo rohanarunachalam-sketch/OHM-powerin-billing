@@ -231,6 +231,8 @@ class SettingsUpdate(BaseModel):
     footer_whatsapp: _short(100) = ""
     footer_email: _short(200) = ""
     footer_address: _short(500) = ""
+    footer_enabled: bool = True
+    footer_image_height: int = Field(default=30, ge=10, le=50)
     logo_heights: list[int] = Field(default=[20, 20, 20], min_length=3, max_length=3)
 
     @field_validator("logo_heights")
@@ -317,8 +319,11 @@ class SettingsOut(ORMModel):
     footer_whatsapp: str
     footer_email: str
     footer_address: str
+    footer_enabled: bool = True
+    footer_image_height: int = 30
     logo_heights: list[int] = [20, 20, 20]
     has_logo: bool
+    has_footer_image: bool = False
     logos: list[bool] = []  # which of the logo slots have an image
     is_configured: bool
     next_invoice_number: str
@@ -498,3 +503,88 @@ class Page(BaseModel):
     items: list
     total: int
 
+
+
+# ---------------------------------------------------------------------------
+# Material management (stock; independent of invoices)
+# ---------------------------------------------------------------------------
+
+Quantity = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=3)]
+Price = Annotated[Decimal, Field(ge=0, max_digits=14, decimal_places=2)]
+
+
+class MaterialBase(BaseModel):
+    name: _short(200) = Field(min_length=1)
+    code: _short(64) = ""
+    category: _short(100) = ""
+    unit: _short(20) = "Nos"
+    min_stock: Quantity = Decimal("0")
+    purchase_price: Price = Decimal("0")
+    selling_price: Price = Decimal("0")
+    location: _short(100) = ""
+    supplier: _short(200) = ""
+    notes: _short(2000) = ""
+
+    @field_validator("unit")
+    @classmethod
+    def _unit(cls, v: str) -> str:
+        return v or "Nos"
+
+
+class MaterialCreate(MaterialBase):
+    opening_stock: Quantity = Decimal("0")
+
+
+class MaterialUpdate(MaterialBase):
+    pass
+
+
+class MaterialOut(ORMModel):
+    id: int
+    name: str
+    code: str
+    category: str
+    unit: str
+    quantity: Decimal
+    min_stock: Decimal
+    purchase_price: Decimal
+    selling_price: Decimal
+    stock_value: Decimal = Decimal("0")
+    is_low: bool = False
+    location: str
+    supplier: str
+    notes: str
+    updated_at: datetime | None
+
+
+class StockMovementCreate(BaseModel):
+    kind: Literal["in", "out", "set"]
+    quantity: Quantity
+    movement_date: date | None = None
+    unit_price: Price | None = None
+    note: _short(300) = ""
+
+
+class StockMovementOut(ORMModel):
+    id: int
+    movement_date: date
+    kind: str
+    quantity: Decimal
+    balance: Decimal
+    unit_price: Decimal | None
+    note: str
+
+
+class MaterialSummary(BaseModel):
+    count: int
+    value_at_cost: Decimal
+    value_at_selling: Decimal
+    low_stock: int
+    out_of_stock: int
+
+
+class MaterialPage(BaseModel):
+    items: list[MaterialOut]
+    total: int
+    summary: MaterialSummary
+    categories: list[str]

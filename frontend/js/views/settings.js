@@ -89,12 +89,26 @@ export async function render({ el, setTitle, isCurrent }) {
         </div>
 
         <div class="card" id="sec-footer">
-          <div class="card-header"><div><h2>Invoice footer (letterhead)</h2><p>The blue strip at the bottom of every invoice page. Leave a line empty to hide it.</p></div></div>
-          <div class="card-body form-grid">
+          <div class="card-header"><div><h2>Invoice footer (letterhead)</h2><p>The contact strip at the bottom of every invoice page. Leave a line empty to hide it. Switch it off to print your own letterhead image instead.</p></div>
+            <label class="switch"><input type="checkbox" name="footer_enabled" data-footer-on><span class="switch-track"></span><span data-footer-state></span></label></div>
+          <div class="card-body form-grid" data-footer-text>
             <div class="field"><label for="s-fphone">Call number</label><input id="s-fphone" name="footer_phone" maxlength="100"></div>
             <div class="field"><label for="s-fwa">WhatsApp number</label><input id="s-fwa" name="footer_whatsapp" maxlength="100"><label class="check" style="display:flex;gap:6px;align-items:center;margin-top:6px;font-weight:400"><input type="checkbox" data-wa-same> Same as call number</label></div>
             <div class="field"><label for="s-femail">Email</label><input id="s-femail" name="footer_email" maxlength="200"></div>
             <div class="field span-2"><label for="s-faddr">Address line</label><input id="s-faddr" name="footer_address" maxlength="500"></div>
+          </div>
+          <div class="card-body footer-image" data-footer-image>
+            <div class="d-label-ui">Footer image</div>
+            <p class="sub">PNG or JPEG, up to 2 MB. Printed across the full width at the bottom of every page, below the invoice border.</p>
+            <div class="footer-preview" data-footer-preview></div>
+            <label class="logo-size" data-footer-size-wrap>Height on invoice: <b data-footer-size-label></b> mm
+              <input type="range" name="footer_image_height" min="10" max="50" step="1" data-footer-size></label>
+            <div class="field-hint">The image always spans the full invoice width; only its height changes. Press Save settings to apply.</div>
+            <input type="file" accept="image/png,image/jpeg" data-footer-input hidden>
+            <div class="footer-actions">
+              <button type="button" class="btn" data-footer-upload data-busy="Uploading…">${icons.upload}Upload image</button>
+              <button type="button" class="btn btn-ghost btn-danger" data-footer-remove>Remove</button>
+            </div>
           </div>
         </div>
 
@@ -183,6 +197,56 @@ export async function render({ el, setTitle, isCurrent }) {
     });
   });
 
+  // Footer: text strip on, or off with an optional letterhead image
+  const footerOn = form.querySelector("[data-footer-on]");
+  const footerText = el.querySelector("[data-footer-text]");
+  const footerImage = el.querySelector("[data-footer-image]");
+  const footerPreview = el.querySelector("[data-footer-preview]");
+  const footerInput = el.querySelector("[data-footer-input]");
+  const footerUpload = el.querySelector("[data-footer-upload]");
+  const footerRemove = el.querySelector("[data-footer-remove]");
+  const showFooterMode = () => {
+    footerText.hidden = !footerOn.checked;
+    footerImage.hidden = footerOn.checked;
+    el.querySelector("[data-footer-state]").textContent = footerOn.checked ? "On" : "Off";
+  };
+  const footerSize = el.querySelector("[data-footer-size]");
+  const showFooterSize = () => {
+    el.querySelector("[data-footer-size-label]").textContent = footerSize.value;
+    const img = footerPreview.querySelector("img");
+    if (img) img.style.aspectRatio = `190 / ${footerSize.value}`;  // same shape as on the 190 mm wide invoice
+  };
+  footerSize.addEventListener("input", showFooterSize);
+  const showFooterImage = (has) => {
+    footerPreview.innerHTML = has ? `<img src="${api.footerImageUrl()}" alt="Footer image">` : "No footer image";
+    footerRemove.hidden = !has;
+    el.querySelector("[data-footer-size-wrap]").hidden = !has;
+    showFooterSize();
+  };
+  footerOn.addEventListener("change", showFooterMode);
+  showFooterMode();
+  showFooterImage(settings.has_footer_image);
+  footerUpload.addEventListener("click", () => footerInput.click());
+  footerInput.addEventListener("change", async () => {
+    const file = footerInput.files[0];
+    footerInput.value = "";
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast("Footer image must be smaller than 2 MB.", "error"); return; }
+    try {
+      setSettings(await withBusy(footerUpload, () => api.uploadFooterImage(file)));
+      showFooterImage(true);
+      toast(footerOn.checked ? "Footer image uploaded" : "Footer image uploaded. Press Save settings if you just switched the footer off.");
+    } catch (error) { toastError(error); }
+  });
+  footerRemove.addEventListener("click", async () => {
+    if (!(await confirmDialog({ title: "Remove footer image?", message: "Invoices will be generated without it.", confirmText: "Remove", danger: true }))) return;
+    try {
+      setSettings(await api.deleteFooterImage());
+      showFooterImage(false);
+      toast("Footer image removed");
+    } catch (error) { toastError(error); }
+  });
+
   const waSame = form.querySelector("[data-wa-same]");
   const phoneInput = form.elements.footer_phone;
   const waInput = form.elements.footer_whatsapp;
@@ -207,6 +271,7 @@ export async function render({ el, setTitle, isCurrent }) {
     data.invoice_start_number = Number(data.invoice_start_number || 1);
     data.invoice_digits = Number(data.invoice_digits || 3);
     data.logo_heights = [...el.querySelectorAll("[data-logo-size]")].map((input) => Number(input.value));
+    data.footer_image_height = Number(data.footer_image_height || 30);
     try {
       const updated = await withBusy(form.querySelector('button[type="submit"]'), () => api.saveSettings(data));
       setSettings(updated);

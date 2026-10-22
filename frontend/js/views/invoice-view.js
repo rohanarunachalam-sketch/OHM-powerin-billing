@@ -60,7 +60,7 @@ export async function render({ el, params, query, setTitle, navigate, isCurrent 
     ${created ? `<div class="banner banner-success">${icons.check}<div><b>Invoice ${esc(inv.invoice_number)} created successfully.</b> The A4 PDF has been generated and stored — download it from the panel on the right.</div></div>` : ""}
     ${inv.status === "Draft" ? `<div class="banner banner-warn">${icons.info}<div>This invoice is a <b>draft</b>. It is not counted in sales until you issue it.</div></div>` : ""}
     <div class="view-layout">
-      <div class="doc-shell" data-fit-doc>${renderInvoiceDocument(inv, { logoUrls: api.logoUrls(settings), logoHeights: api.logoHeights(settings) })}</div>
+      <div class="doc-shell" data-fit-doc>${renderInvoiceDocument(inv, api.docOptions(settings))}</div>
       <div class="stack">
         <div class="card side-card">
           <div class="card-header"><h2>${esc(inv.invoice_number)}</h2>${statusPill(inv.status)}</div>

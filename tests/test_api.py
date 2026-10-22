@@ -425,3 +425,68 @@ def test_static_bundle_is_up_to_date():
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
     import build_static
     assert build_static.is_current(), "Run `python tools/build_static.py` and commit frontend/engine/app.zip"
+
+
+def test_footer_toggle_and_footer_image(client):
+    import io
+    from PIL import Image
+
+    client.put("/api/settings", json=BUSINESS)
+    r = client.get("/api/settings")
+    assert r.json()["footer_enabled"] is True and r.json()["has_footer_image"] is False
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (900, 145), (31, 111, 181)).save(buffer, format="PNG")
+    r = client.post("/api/settings/footer-image", files={"file": ("footer.png", buffer.getvalue(), "image/png")})
+    assert r.status_code == 200, r.text
+    assert r.json()["has_footer_image"] is True
+    assert client.get("/api/settings/footer-image").status_code == 200
+    r = client.post("/api/settings/footer-image", files={"file": ("evil.png", b"not an image", "image/png")})
+    assert r.status_code == 400
+
+    r = client.put("/api/settings", json={**BUSINESS, "footer_enabled": False})
+    assert r.status_code == 200 and r.json()["footer_enabled"] is False
+
+    r = client.delete("/api/settings/footer-image")
+    assert r.json()["has_footer_image"] is False
+    assert client.get("/api/settings/footer-image").status_code == 404
+
+
+def test_footer_image_height_saved_and_validated(client):
+    r = client.put("/api/settings", json={**BUSINESS, "footer_image_height": 22})
+    assert r.status_code == 200 and r.json()["footer_image_height"] == 22
+    assert client.put("/api/settings", json={**BUSINESS, "footer_image_height": 90}).status_code in (400, 422)
+
+
+def test_material_stock_management(client):
+    from decimal import Decimal as D
+
+    r = client.post("/api/materials", json={
+        "name": "Fuel filter", "code": "FF-01", "category": "Filters", "unit": "Nos",
+        "min_stock": "5", "purchase_price": "120.50", "selling_price": "180", "opening_stock": "10",
+    })
+    assert r.status_code == 201, r.text
+    m = r.json()
+    assert D(m["quantity"]) == D("10.000") and D(m["stock_value"]) == D("1205.00") and m["is_low"] is False
+    assert client.post("/api/materials", json={"name": "Dup", "code": "ff-01"}).status_code == 409
+
+    r = client.post(f"/api/materials/{m['id']}/stock", json={"kind": "out", "quantity": "6", "note": "Site work"})
+    assert r.status_code == 200 and D(r.json()["quantity"]) == D("4.000") and r.json()["is_low"] is True
+    assert client.post(f"/api/materials/{m['id']}/stock", json={"kind": "out", "quantity": "5"}).status_code == 400
+    r = client.post(f"/api/materials/{m['id']}/stock", json={"kind": "in", "quantity": "2", "unit_price": "125"})
+    assert D(r.json()["quantity"]) == D("6.000") and D(r.json()["purchase_price"]) == D("125.00")
+    r = client.post(f"/api/materials/{m['id']}/stock", json={"kind": "set", "quantity": "3"})
+    assert D(r.json()["quantity"]) == D("3.000")
+
+    moves = client.get(f"/api/materials/{m['id']}/movements").json()
+    assert [x["kind"] for x in moves] == ["set", "in", "out", "in"]
+    assert D(moves[0]["quantity"]) == D("-3.000") and D(moves[0]["balance"]) == D("3.000")
+
+    page = client.get("/api/materials", params={"low_stock": True}).json()
+    assert page["total"] == 1 and page["summary"]["low_stock"] == 1 and page["categories"] == ["Filters"]
+    assert D(page["summary"]["value_at_cost"]) == D("375.00")
+
+    r = client.put(f"/api/materials/{m['id']}", json={"name": "Fuel filter (big)", "code": "FF-01", "selling_price": "190"})
+    assert r.status_code == 200 and D(r.json()["quantity"]) == D("3.000")  # editing details never changes stock
+    assert client.delete(f"/api/materials/{m['id']}").status_code == 204
+    assert client.get(f"/api/materials/{m['id']}").status_code == 404
