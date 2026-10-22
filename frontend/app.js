@@ -143,6 +143,44 @@ document.getElementById("menu-btn").addEventListener("click", (event) => {
 });
 document.getElementById("sidebar-backdrop").addEventListener("click", () => document.body.classList.remove("nav-open"));
 
+// Keyboard shortcuts. Views mark their buttons with data-shortcut="save" / "print"; the visible one is pressed.
+// Esc (close the top modal) is handled by openModal; Enter (add item row) by the invoice form.
+const visible = (node) => node && node.offsetParent !== null && !node.disabled;
+const topModal = () => document.querySelector("#modal-root > .modal-backdrop:last-child");
+
+function shortcutTarget(name) {
+  const scope = topModal() || viewEl;
+  return [...scope.querySelectorAll(`[data-shortcut="${name}"]`)].find(visible) || null;
+}
+
+document.addEventListener("keydown", (event) => {
+  const ctrl = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  if (event.repeat) return;
+  // Ctrl+N: browsers keep it for "new window", so Alt+N works as well.
+  if ((ctrl && !event.shiftKey && key === "n") || (event.altKey && !ctrl && key === "n")) {
+    event.preventDefault();
+    if (topModal()) return;
+    navigate("#/invoices/new");
+    return;
+  }
+  if (ctrl && !event.shiftKey && !event.altKey && key === "s") {
+    event.preventDefault();  // never the browser's "Save page as"
+    const modal = topModal();
+    const target = modal
+      ? [...modal.querySelectorAll('button[type="submit"]')].find(visible)
+      : shortcutTarget("save");
+    target?.click();
+    return;
+  }
+  if (ctrl && !event.shiftKey && !event.altKey && key === "p") {
+    const target = topModal() ? null : shortcutTarget("print");
+    if (!target) return;  // nothing to preview here: let the browser print the page
+    event.preventDefault();
+    target.click();
+  }
+});
+
 window.addEventListener("unhandledrejection", (event) => {
   console.error(event.reason);
   toastError(event.reason);

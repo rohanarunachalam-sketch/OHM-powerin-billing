@@ -120,7 +120,7 @@ export async function render({ el, setTitle, isCurrent }) {
           </div>
         </div>
 
-        <div class="sticky-footer"><span class="sub" data-status></span><span class="spacer"></span><button type="submit" class="btn btn-primary btn-lg">Save settings</button></div>
+        <div class="sticky-footer"><span class="sub" data-status></span><span class="spacer"></span><button type="submit" class="btn btn-primary btn-lg" data-shortcut="save" title="Ctrl+S">Save settings</button></div>
       </div>
     </form>`;
 

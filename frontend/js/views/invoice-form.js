@@ -160,7 +160,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
           </table>
         </div>
         <div class="items-footer">
-          <button type="button" class="btn btn-sm" data-add-row>${icons.plus}Add Item</button>
+          <button type="button" class="btn btn-sm" data-add-row title="Enter in an item row">${icons.plus}Add Item</button>
           <button type="button" class="btn btn-sm btn-ghost" data-new-product>${icons.box}Create new product</button>
         </div>
       </div>
@@ -179,8 +179,8 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
         <a class="btn btn-ghost" href="${editingId ? `#/invoices/${editingId}` : "#/invoices"}">Cancel</a>
         <span class="spacer"></span>
         <button type="button" class="btn" data-save-draft data-busy="Saving…">Save as Draft</button>
-        <button type="button" class="btn" data-preview data-busy="Calculating…">${icons.eye}Full preview</button>
-        <button type="button" class="btn btn-primary btn-lg" data-save-main data-busy="Generating PDF…">${icons.check}${editingId ? "Save changes" : "Save & Generate PDF"}</button>
+        <button type="button" class="btn" data-preview data-shortcut="print" title="Ctrl+P" data-busy="Calculating…">${icons.eye}Full preview</button>
+        <button type="button" class="btn btn-primary btn-lg" data-save-main data-shortcut="save" title="Ctrl+S" data-busy="Generating PDF…">${icons.check}${editingId ? "Save changes" : "Save & Generate PDF"}</button>
       </div>
       </div>
       <aside class="compose-preview" aria-label="Invoice preview">
@@ -411,6 +411,15 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
     markDirty();
     renderRows();
   });
+  // Enter in an item row adds a new row (unless the suggestion list just used the Enter to pick an item).
+  rowsEl.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.defaultPrevented || event.ctrlKey || event.altKey || event.shiftKey || event.isComposing) return;
+    if (!event.target.matches("input, select")) return;
+    event.preventDefault();
+    const index = Number(event.target.closest("tr")?.dataset.row);
+    if (state.items[index] && isEmptyRow(state.items[index])) return;  // fill this row first
+    $("[data-add-row]").click();
+  });
   $("[data-add-row]").addEventListener("click", () => {
     state.items.push(blankRow());
     renderRows();
@@ -611,7 +620,7 @@ export async function render({ el, params, query, setTitle, navigate, setLeaveGu
         <button type="button" class="btn" data-back>${icons.back}Back to edit</button>
         <span class="spacer"></span>
         <button type="button" class="btn" data-save-draft-2 data-busy="Saving…">Save as Draft</button>
-        <button type="button" class="btn btn-primary btn-lg" data-save data-busy="Generating PDF…">${icons.download}Save &amp; Generate PDF</button>
+        <button type="button" class="btn btn-primary btn-lg" data-save data-shortcut="save" title="Ctrl+S" data-busy="Generating PDF…">${icons.download}Save &amp; Generate PDF</button>
       </div>`;
     window.scrollTo(0, 0);
     fitDocument(pane.querySelector(".doc-shell"));

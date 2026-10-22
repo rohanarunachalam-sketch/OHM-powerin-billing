@@ -73,7 +73,7 @@ export async function render({ el, params, query, setTitle, navigate, isCurrent 
         <div class="card">
           <div class="action-list">
             <a class="btn btn-primary btn-lg" href="${api.pdfUrl(id, true)}" download data-download>${icons.download}Download PDF</a>
-            <a class="btn" href="${api.pdfUrl(id)}" target="_blank" rel="noopener">${icons.print}Print / open PDF</a>
+            <a class="btn" href="${api.pdfUrl(id)}" target="_blank" rel="noopener" data-shortcut="print" title="Ctrl+P">${icons.print}Print / open PDF</a>
             ${canPay ? `<button class="btn" data-pay>${icons.rupee}Record payment</button>
                         <button class="btn" data-paid>${icons.check}Mark as paid</button>` : ""}
             ${inv.status === "Draft" ? `<button class="btn" data-issue>${icons.check}Issue invoice</button>` : ""}
