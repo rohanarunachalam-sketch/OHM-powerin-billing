@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..models import Customer, Invoice, Product
+from ..models import Customer, Invoice, Material, Product, StockMovement
 from ..routers.customers import _with_stats
 from ..services import invoice_service, settings_service
 
@@ -124,6 +124,26 @@ def export_xlsx(db: Session = Depends(get_db)) -> StreamingResponse:
          i.taxable_amount, i.cgst, i.sgst, i.igst, i.amount)
         for o in outs for n, i in enumerate(o.items, start=1)
     ], money_cols=("Rate", "Discount", "Taxable value", "CGST", "SGST", "IGST", "Amount"))
+
+    materials = db.scalars(select(Material).order_by(func.lower(Material.name))).all()
+    _sheet(wb, "Materials", [
+        "Code / Part No", "Material", "Category", "Unit", "Stock", "Minimum stock", "Purchase price", "Selling price",
+        "Stock value (cost)", "Stock value (selling)", "Location", "Supplier", "Notes",
+    ], [
+        (m.code, m.name, m.category, m.unit, m.quantity, m.min_stock, m.purchase_price, m.selling_price,
+         (m.quantity * m.purchase_price).quantize(Decimal("0.01")), (m.quantity * m.selling_price).quantize(Decimal("0.01")),
+         m.location, m.supplier, m.notes)
+        for m in materials
+    ], money_cols=("Purchase price", "Selling price", "Stock value (cost)", "Stock value (selling)"))
+
+    names = {m.id: m for m in materials}
+    kinds = {"in": "Stock in", "out": "Stock out", "set": "Stock count"}
+    movements = db.scalars(select(StockMovement).order_by(StockMovement.movement_date, StockMovement.id)).all()
+    _sheet(wb, "Stock Movements", ["Date", "Code / Part No", "Material", "Type", "Change", "Balance", "Unit", "Price", "Note"], [
+        (mv.movement_date, names[mv.material_id].code, names[mv.material_id].name, kinds.get(mv.kind, mv.kind), mv.quantity,
+         mv.balance, names[mv.material_id].unit, mv.unit_price, mv.note)
+        for mv in movements if mv.material_id in names
+    ], money_cols=("Price",), date_cols=("Date",))
 
     buffer = BytesIO()
     wb.save(buffer)

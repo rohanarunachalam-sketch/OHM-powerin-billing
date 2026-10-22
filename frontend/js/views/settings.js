@@ -115,7 +115,7 @@ export async function render({ el, setTitle, isCurrent }) {
         <div class="card" id="sec-export">
           <div class="card-header"><div><h2>Export data</h2><p>Download everything as one Excel workbook for backup or accounting.</p></div></div>
           <div class="card-body">
-            <p class="modal-text">The file has five sheets: <b>Business</b> details, <b>Customers</b>, <b>Products</b> (the full catalogue), <b>Invoices</b> and <b>Invoice Items</b>. It includes your bank details, so keep the file private.</p>
+            <p class="modal-text">The file has seven sheets: <b>Business</b> details, <b>Customers</b>, <b>Products</b> (the full catalogue), <b>Invoices</b>, <b>Invoice Items</b>, <b>Materials</b> (stock and prices) and <b>Stock Movements</b> (stock in / out history). It includes your bank details, so keep the file private.</p>
             <a class="btn btn-primary" href="api/export/xlsx" download data-export>${icons.download}Download all data (.xlsx)</a>
           </div>
         </div>

@@ -409,10 +409,11 @@ def test_export_all_data_as_xlsx(client):
     assert r.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml")
     assert "OHM-Powerin-data-" in r.headers["content-disposition"] and ".xlsx" in r.headers["content-disposition"]
     wb = load_workbook(BytesIO(r.content))
-    assert wb.sheetnames == ["Business", "Customers", "Products", "Invoices", "Invoice Items"]
+    assert wb.sheetnames == ["Business", "Customers", "Products", "Invoices", "Invoice Items", "Materials", "Stock Movements"]
     assert wb["Invoices"].max_row - 1 == client.get("/api/invoices", params={"limit": 1}).json()["total"]
     assert wb["Products"].max_row - 1 == client.get("/api/products", params={"limit": 1}).json()["total"]
     assert wb["Customers"].max_row - 1 == client.get("/api/customers", params={"limit": 1}).json()["total"]
+    assert wb["Materials"].max_row - 1 == client.get("/api/materials").json()["summary"]["count"]
     # totals are real numbers, not text
     headers = [c.value for c in wb["Invoices"][1]]
     grand = headers.index("Grand total") + 1
@@ -490,3 +491,17 @@ def test_material_stock_management(client):
     assert r.status_code == 200 and D(r.json()["quantity"]) == D("3.000")  # editing details never changes stock
     assert client.delete(f"/api/materials/{m['id']}").status_code == 204
     assert client.get(f"/api/materials/{m['id']}").status_code == 404
+
+
+def test_export_includes_materials_and_stock_movements(client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    m = client.post("/api/materials", json={"name": "Export check", "code": "EXP-1", "purchase_price": "10", "selling_price": "15", "opening_stock": "4"}).json()
+    client.post(f"/api/materials/{m['id']}/stock", json={"kind": "out", "quantity": "1", "note": "used"})
+    wb = load_workbook(BytesIO(client.get("/api/export/xlsx").content))
+    rows = [[c.value for c in row] for row in wb["Materials"].iter_rows(min_row=2)]
+    row = next(r for r in rows if r[0] == "EXP-1")
+    assert row[4] == 3 and row[8] == 30 and row[9] == 45  # stock, value at cost, value at selling
+    moves = [[c.value for c in row] for row in wb["Stock Movements"].iter_rows(min_row=2) if row[1].value == "EXP-1"]
+    assert [r[3] for r in moves] == ["Stock in", "Stock out"] and moves[1][4] == -1 and moves[1][5] == 3
+    client.delete(f"/api/materials/{m['id']}")
